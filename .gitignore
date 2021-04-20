@@ -1,0 +1,6 @@
+nvidiaModel/build/
+.idea/
+.vs/
+nvidiaModel/compiling.txt
+nvidiaModel/nvidiaModel.vcxproj
+nvidiaModel/nvidiaModel.vcxproj.user
