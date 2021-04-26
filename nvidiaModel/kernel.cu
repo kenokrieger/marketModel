@@ -25,6 +25,7 @@
 #include <fstream>
 #include <iostream>
 #include <string>
+#include "ProgressBar.h"
 
 #include <cuda_fp16.h>
 #include <curand.h>
@@ -38,10 +39,14 @@
 #include "helper_cuda.h"
 #include "device_launch_parameters.h"
 
-#define TCRIT 1.0f
-#define THREADS  128
+#define timer std::chrono::high_resolution_clock
+#define THREADS 128
 
+// The global market represents the sum over the strategies of each
+// agent. Agents will choose a strategy contrary to the sign of the
+// global market.
 __device__ int GLOBAL_MARKET = 0;
+
 
 __global__ void init_agents(signed char* agents,
                               const float* __restrict__ random_values,
@@ -58,6 +63,7 @@ __global__ void init_agents(signed char* agents,
     float random = random_values[thread_id];
     agents[thread_id] = (random < 0.5f) ? -1 : 1;
 }
+
 
 template<bool is_black>
 __global__ void update_agents(signed char* agents,
@@ -99,7 +105,8 @@ __global__ void update_agents(signed char* agents,
             checkerboard_agents[upper_neighbor_row * grid_width + col]
           + checkerboard_agents[lower_neighbor_row * grid_width + col]
           + checkerboard_agents[row * grid_width + col]
-          + checkerboard_agents[row * grid_width + horizontal_neighbor_col]);
+          + checkerboard_agents[row * grid_width + horizontal_neighbor_col]
+          );
 
     signed char old_strategy = agents[row * grid_width + col];
     double market_coupling = -alpha / pow(grid_width, 2) * abs(GLOBAL_MARKET);
@@ -107,14 +114,15 @@ __global__ void update_agents(signed char* agents,
     // Determine whether to flip spin
     float probability = 1 / (1 + exp(-2.0 * beta * field));
     signed char new_strategy = random_values[row * grid_width + col] < probability ? -1 : 1;
+    agents[row * grid_width + col] = new_strategy;
+    // If the strategy was changed remove the old value from the sum and add the new value.
     if (new_strategy != old_strategy)
         GLOBAL_MARKET -= 2 * old_strategy;
-    agents[row * grid_width + col] = new_strategy;
 }
+
 
 // Write lattice configuration to file
 void write_lattice(signed char *lattice_b, signed char *lattice_w, std::string filename, long long nx, long long ny) {
-  printf("Writing lattice to %s...\n", filename.c_str());
   signed char *lattice_h, *lattice_b_h, *lattice_w_h;
   lattice_h = (signed char*) malloc(nx * ny * sizeof(*lattice_h));
   lattice_b_h = (signed char*) malloc(nx * ny/2 * sizeof(*lattice_b_h));
@@ -152,120 +160,125 @@ void write_lattice(signed char *lattice_b, signed char *lattice_w, std::string f
   free(lattice_w_h);
 }
 
-void update(signed char *lattice_b, signed char *lattice_w, float* randvals, curandGenerator_t rng, float alpha,
-            float inv_temp, float j, long long nx, long long ny) {
 
+void update(signed char *lattice_b, signed char *lattice_w, float* random_values, curandGenerator_t rng, float alpha,
+            float beta, float j, long long grid_height, long long grid_width) {
   // Setup CUDA launch configuration
-  int blocks = (nx * ny/2 + THREADS - 1) / THREADS;
+  int blocks = (grid_height * grid_width/2 + THREADS - 1) / THREADS;
 
-  // Update black
-  CHECK_CURAND(curandGenerateUniform(rng, randvals, nx*ny/2));
-  update_agents<true><<<blocks, THREADS>>>(lattice_b, lattice_w, randvals, alpha, inv_temp, j, nx, ny/2);
+  // Update black tiles on "checkerboard"
+  CHECK_CURAND(curandGenerateUniform(rng, random_values, grid_height*grid_width/2));
+  update_agents<true><<<blocks, THREADS>>>(lattice_b, lattice_w, random_values, alpha, beta, j, grid_height, grid_width/2);
 
-  // Update white
-  CHECK_CURAND(curandGenerateUniform(rng, randvals, nx*ny/2));
-  update_agents<false><<<blocks, THREADS>>>(lattice_w, lattice_b, randvals, alpha, inv_temp, j, nx, ny/2);
+  // Update white tiles on "checkerboard"
+  CHECK_CURAND(curandGenerateUniform(rng, random_values, grid_height*grid_width/2));
+  update_agents<false><<<blocks, THREADS>>>(lattice_w, lattice_b, random_values, alpha, beta, j, grid_height, grid_width/2);
 }
 
+
 int main() {
+    // Default parameters
+    long long grid_height = 2048;
+    long long grid_width = 2048;
+    int warmup_iterations = 100;
+    int total_iterations = 100000;
+    bool save_to_file = true;
+    unsigned int seed = std::chrono::steady_clock::now().time_since_epoch().count();
+    float alpha = 4.0f;
+    float j = 1.0f;
+    float beta = 1 / 1.5f;
+
     cudaDeviceProp deviceProp;
     deviceProp.major = 0;
     deviceProp.minor = 0;
-
-    //Use command-line specified CUDA device, otherwise use device with highest Gflops/s
+    // Use command-line specified CUDA device, otherwise use device with highest Gflops/s
     // command-line input is given as 0, 0
     int dev = findCudaDevice(0, 0);
-
     checkCudaErrors(cudaGetDeviceProperties(&deviceProp, dev));
-
     printf("CUDA device [%s] has %d Multi-Processors, Compute %d.%d\n",
         deviceProp.name, deviceProp.multiProcessorCount, deviceProp.major, deviceProp.minor);
 
-    // Defaults
-    long long nx = 2048;
-    long long ny = 2048;
-    int nwarmup = 100;
-    int niters = 1000;
-    bool write = false;
-    unsigned long long seed = 1234ULL;
-    write = false;
+    // Set up cuRAND generator
+    curandGenerator_t rng;
+    CHECK_CURAND(curandCreateGenerator(&rng, CURAND_RNG_PSEUDO_PHILOX4_32_10));
+    CHECK_CURAND(curandSetPseudoRandomGeneratorSeed(rng, seed));
+    float *random_values;
+    CHECK_CUDA(cudaMalloc(&random_values, grid_height * grid_width/2 * sizeof(*random_values)));
 
-  float inv_temp = 1 / 1.5f;
+    // Set up black and white lattice arrays on device
+    signed char *black_tiles, *white_tiles;
+    CHECK_CUDA(cudaMalloc(&black_tiles, grid_height * grid_width/2 * sizeof(*black_tiles)));
+    CHECK_CUDA(cudaMalloc(&white_tiles, grid_height * grid_width/2 * sizeof(*white_tiles)));
 
-  // Setup cuRAND generator
-  curandGenerator_t rng;
-  CHECK_CURAND(curandCreateGenerator(&rng, CURAND_RNG_PSEUDO_PHILOX4_32_10));
-  CHECK_CURAND(curandSetPseudoRandomGeneratorSeed(rng, seed));
-  float *randvals;
-  CHECK_CUDA(cudaMalloc(&randvals, nx * ny/2 * sizeof(*randvals)));
+    int blocks = (grid_height * grid_width/2 + THREADS - 1) / THREADS;
+    CHECK_CURAND(curandGenerateUniform(rng, random_values, grid_height*grid_width/2));
+    init_agents<<<blocks, THREADS>>>(black_tiles, random_values, grid_height, grid_width/2);
+    CHECK_CURAND(curandGenerateUniform(rng, random_values, grid_height*grid_width/2));
+    init_agents<<<blocks, THREADS>>>(white_tiles, random_values, grid_height, grid_width/2);
 
-  // Setup black and white lattice arrays on device
-  signed char *lattice_b, *lattice_w;
-  CHECK_CUDA(cudaMalloc(&lattice_b, nx * ny/2 * sizeof(*lattice_b)));
-  CHECK_CUDA(cudaMalloc(&lattice_w, nx * ny/2 * sizeof(*lattice_w)));
+    // Warmup iterations
+    printf("Starting warmup...\n");
+    for (int i = 0; i < warmup_iterations; i++)
+        update(black_tiles, white_tiles, random_values, rng, alpha, beta, j, grid_height, grid_width);
+    // Synchronize operations on the GPU with CPU
+    CHECK_CUDA(cudaDeviceSynchronize());
 
-  int blocks = (nx * ny/2 + THREADS - 1) / THREADS;
-  CHECK_CURAND(curandGenerateUniform(rng, randvals, nx*ny/2));
-  init_agents<<<blocks, THREADS>>>(lattice_b, randvals, nx, ny/2);
-  CHECK_CURAND(curandGenerateUniform(rng, randvals, nx*ny/2));
-  init_agents<<<blocks, THREADS>>>(lattice_w, randvals, nx, ny/2);
+    printf("Starting trial iterations...\n");
+    ProgressBar progress_bar = ProgressBar(total_iterations);
+    timer::time_point start = timer::now();
+    progress_bar.start();
+    for (int iteration = 0; iteration < total_iterations; iteration++) {
+        update(black_tiles, white_tiles, random_values, rng, alpha, beta, j, grid_height, grid_width);
+        progress_bar.next();
+        if (iteration % 1000 == 0) {
+            std::string filename = "saves/frame_" + std::to_string(iteration) + ".dat";
+            write_lattice(black_tiles, white_tiles, filename, grid_height, grid_width);
+        }
+    }
+    progress_bar.end();
 
-  float alpha = 3.0f;
-  float j = 1.0f;
-  // Warmup iterations
-  printf("Starting warmup...\n");
-  for (int i = 0; i < nwarmup; i++) {
-    update(lattice_b, lattice_w, randvals, rng, alpha, inv_temp, j, nx, ny);
-  }
+    CHECK_CUDA(cudaDeviceSynchronize());
+    timer::time_point stop = timer::now();
 
-  CHECK_CUDA(cudaDeviceSynchronize());
+    double duration = (double) std::chrono::duration_cast<std::chrono::microseconds>(stop-start).count();
+    printf("REPORT:\n");
+    printf("\tnGPUs: %d\n", 1);
+    printf("\talpha: %f\n", alpha);
+    printf("\tbeta: %f\n", beta);
+    printf("\tj: %f\n", j);
+    printf("\tseed: %u\n", seed);
+    printf("\twarmup iterations: %d\n", warmup_iterations);
+    printf("\ttrial iterations: %d\n", total_iterations);
+    printf("\tlattice dimensions: %lld x %lld\n", grid_height, grid_width);
+    printf("\telapsed time: %f sec\n", duration * 1e-6);
+    printf("\tupdates per ns: %f\n", (double) (grid_height * grid_width) * total_iterations / duration * 1e-3);
 
-  printf("Starting trial iterations...\n");
-  auto t0 = std::chrono::high_resolution_clock::now();
-  for (int i = 0; i < niters; i++) {
-    update(lattice_b, lattice_w, randvals, rng, alpha, inv_temp, j, nx, ny);
-    if (i % 1000 == 0) printf("Completed %d/%d iterations...\n", i+1, niters);
-  }
+    // Reduce
+    double* device_sum;
+    int number_of_chunks = (grid_height * grid_width / 2 + CUB_CHUNK_SIZE - 1)/ CUB_CHUNK_SIZE;
+    CHECK_CUDA(cudaMalloc(&device_sum, 2 * number_of_chunks * sizeof(*device_sum)));
+    size_t cub_workspace_bytes = 0;
+    void* workspace = NULL;
+    CHECK_CUDA(cub::DeviceReduce::Sum(workspace, cub_workspace_bytes, black_tiles, device_sum, CUB_CHUNK_SIZE));
+    CHECK_CUDA(cudaMalloc(&workspace, cub_workspace_bytes));
+    for (int i = 0; i < number_of_chunks; i++) {
+        CHECK_CUDA(cub::DeviceReduce::Sum(workspace, cub_workspace_bytes, &black_tiles[i * CUB_CHUNK_SIZE], device_sum + 2 * i,
+                               std::min((long long) CUB_CHUNK_SIZE, grid_height * grid_width/2 - i * CUB_CHUNK_SIZE)));
+        CHECK_CUDA(cub::DeviceReduce::Sum(workspace, cub_workspace_bytes, &white_tiles[i*CUB_CHUNK_SIZE], device_sum + 2 * i + 1,
+                               std::min((long long) CUB_CHUNK_SIZE, grid_height * grid_width/2 - i * CUB_CHUNK_SIZE)));
+    }
 
-  CHECK_CUDA(cudaDeviceSynchronize());
-  auto t1 = std::chrono::high_resolution_clock::now();
+    double* host_sum;
+    host_sum = (double*)malloc(2 * number_of_chunks * sizeof(*host_sum));
+    CHECK_CUDA(cudaMemcpy(host_sum, device_sum, 2 * number_of_chunks * sizeof(*device_sum), cudaMemcpyDeviceToHost));
+    double total_sum = 0.0;
+    for (int i = 0; i < 2 * number_of_chunks; i++) {
+        total_sum += host_sum[i];
+    }
+    std::cout << "\taverage magnetism (absolute): " << abs(total_sum / (grid_height * grid_width)) << std::endl;
 
-  double duration = (double) std::chrono::duration_cast<std::chrono::microseconds>(t1-t0).count();
-  printf("REPORT:\n");
-  printf("\tnGPUs: %d\n", 1);
-  printf("\ttemperature: %f * %f\n", alpha, TCRIT);
-  printf("\tseed: %llu\n", seed);
-  printf("\twarmup iterations: %d\n", nwarmup);
-  printf("\ttrial iterations: %d\n", niters);
-  printf("\tlattice dimensions: %lld x %lld\n", nx, ny);
-  printf("\telapsed time: %f sec\n", duration * 1e-6);
-  printf("\tupdates per ns: %f\n", (double) (nx * ny) * niters / duration * 1e-3);
+    if (save_to_file)
+        write_lattice(black_tiles, white_tiles, "final_configuration.txt", grid_height, grid_width);
 
-  // Reduce
-  double* devsum;
-  int nchunks = (nx * ny/2 + CUB_CHUNK_SIZE - 1)/ CUB_CHUNK_SIZE;
-  CHECK_CUDA(cudaMalloc(&devsum, 2 * nchunks * sizeof(*devsum)));
-  size_t cub_workspace_bytes = 0;
-  void* workspace = NULL;
-  CHECK_CUDA(cub::DeviceReduce::Sum(workspace, cub_workspace_bytes, lattice_b, devsum, CUB_CHUNK_SIZE));
-  CHECK_CUDA(cudaMalloc(&workspace, cub_workspace_bytes));
-  for (int i = 0; i < nchunks; i++) {
-    CHECK_CUDA(cub::DeviceReduce::Sum(workspace, cub_workspace_bytes, &lattice_b[i*CUB_CHUNK_SIZE], devsum + 2*i,
-                           std::min((long long) CUB_CHUNK_SIZE, nx * ny/2 - i * CUB_CHUNK_SIZE)));
-    CHECK_CUDA(cub::DeviceReduce::Sum(workspace, cub_workspace_bytes, &lattice_w[i*CUB_CHUNK_SIZE], devsum + 2*i + 1,
-                           std::min((long long) CUB_CHUNK_SIZE, nx * ny/2 - i * CUB_CHUNK_SIZE)));
-  }
-
-  double* hostsum;
-  hostsum = (double*)malloc(2 * nchunks * sizeof(*hostsum));
-  CHECK_CUDA(cudaMemcpy(hostsum, devsum, 2 * nchunks * sizeof(*devsum), cudaMemcpyDeviceToHost));
-  double fullsum = 0.0;
-  for (int i = 0; i < 2 * nchunks; i++) {
-    fullsum += hostsum[i];
-  }
-  std::cout << "\taverage magnetism (absolute): " << abs(fullsum / (nx * ny)) << std::endl;
-
-  if (write) write_lattice(lattice_b, lattice_w, "final.txt", nx, ny);
-
-  return 0;
+    return 0;
 }
