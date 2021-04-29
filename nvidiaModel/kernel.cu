@@ -50,8 +50,8 @@ __device__ int GLOBAL_MARKET = 0;
 
 __global__ void init_agents(signed char* agents,
                               const float* __restrict__ random_values,
-                              const long long grid_height,
-                              const long long grid_width) {
+                              const unsigned long long grid_height,
+                              const unsigned long long grid_width) {
     // iterate over all agents in parallel and assign each of them
     // a strategy of either +1 or -1
     const long long  thread_id = static_cast<long long>(blockDim.x) * blockIdx.x + threadIdx.x;
@@ -72,8 +72,8 @@ __global__ void update_agents(signed char* agents,
                               const float alpha,
                               const float beta,
                               const float j,
-                              const long long grid_height,
-                              const long long grid_width) {
+                              const unsigned long long grid_height,
+                              const unsigned long long grid_width) {
     const long long thread_id = static_cast<long long>(blockDim.x) * blockIdx.x + threadIdx.x;
     const int row = thread_id / grid_width;
     const int col = thread_id % grid_width;
@@ -99,7 +99,7 @@ __global__ void update_agents(signed char* agents,
         horizontal_neighbor_col = (row % 2) ? left_neighbor_col : right_neighbor_col;
     }
     // Compute sum of nearest neighbor spins:
-    // Multiply the row with the grid-width to contain
+    // Multiply the row with the grid-width to receive
     // the actual index in the array
     float neighbor_coupling = j * (
             checkerboard_agents[upper_neighbor_row * grid_width + col]
@@ -120,9 +120,8 @@ __global__ void update_agents(signed char* agents,
         GLOBAL_MARKET -= 2 * old_strategy;
 }
 
-
 // Write lattice configuration to file
-void write_lattice(signed char *lattice_b, signed char *lattice_w, std::string filename, long long nx, long long ny) {
+void write_lattice(signed char *lattice_b, signed char *lattice_w, std::string filename, unsigned long long nx, unsigned long long ny) {
   signed char *lattice_h, *lattice_b_h, *lattice_w_h;
   lattice_h = (signed char*) malloc(nx * ny * sizeof(*lattice_h));
   lattice_b_h = (signed char*) malloc(nx * ny/2 * sizeof(*lattice_b_h));
@@ -162,7 +161,7 @@ void write_lattice(signed char *lattice_b, signed char *lattice_w, std::string f
 
 
 void update(signed char *lattice_b, signed char *lattice_w, float* random_values, curandGenerator_t rng, float alpha,
-            float beta, float j, long long grid_height, long long grid_width) {
+            float beta, float j, unsigned long long grid_height, unsigned long long grid_width) {
   // Setup CUDA launch configuration
   int blocks = (grid_height * grid_width/2 + THREADS - 1) / THREADS;
 
@@ -178,11 +177,12 @@ void update(signed char *lattice_b, signed char *lattice_w, float* random_values
 
 int main() {
     // Default parameters
-    long long grid_height = 2048;
-    long long grid_width = 2048;
-    int warmup_iterations = 100;
-    int total_iterations = 100000;
-    bool save_to_file = true;
+    unsigned long long grid_height = 2048;
+    unsigned long long grid_width = 2048;
+    int warmup_iterations = 1000;
+    int total_iterations = 10000;
+    int updates_between_saves = 200;
+    bool save_to_file = false;
     unsigned int seed = std::chrono::steady_clock::now().time_since_epoch().count();
     float alpha = 4.0f;
     float j = 1.0f;
@@ -224,14 +224,14 @@ int main() {
     CHECK_CUDA(cudaDeviceSynchronize());
 
     printf("Starting trial iterations...\n");
-    ProgressBar progress_bar = ProgressBar(total_iterations);
+    ProgressBar progress_bar = ProgressBar(total_iterations, grid_height, grid_width);
     timer::time_point start = timer::now();
     progress_bar.start();
     for (int iteration = 0; iteration < total_iterations; iteration++) {
         update(black_tiles, white_tiles, random_values, rng, alpha, beta, j, grid_height, grid_width);
         progress_bar.next();
-        if (iteration % 1000 == 0) {
-            std::string filename = "saves/frame_" + std::to_string(iteration) + ".dat";
+        if (iteration % updates_between_saves == 0) {
+            std::string filename = "saves/frame_" + std::to_string(iteration / updates_between_saves) + ".dat";
             write_lattice(black_tiles, white_tiles, filename, grid_height, grid_width);
         }
     }
@@ -252,7 +252,9 @@ int main() {
     printf("\tlattice dimensions: %lld x %lld\n", grid_height, grid_width);
     printf("\telapsed time: %f sec\n", duration * 1e-6);
     printf("\tupdates per ns: %f\n", (double) (grid_height * grid_width) * total_iterations / duration * 1e-3);
+    std::cout << std::flush;
 
+    /*
     // Reduce
     double* device_sum;
     int number_of_chunks = (grid_height * grid_width / 2 + CUB_CHUNK_SIZE - 1)/ CUB_CHUNK_SIZE;
@@ -279,6 +281,6 @@ int main() {
 
     if (save_to_file)
         write_lattice(black_tiles, white_tiles, "final_configuration.txt", grid_height, grid_width);
-
+    */
     return 0;
 }
