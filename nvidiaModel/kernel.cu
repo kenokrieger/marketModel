@@ -49,9 +49,9 @@ __device__ int GLOBAL_MARKET = 0;
 
 
 __global__ void init_agents(signed char* agents,
-                              const float* __restrict__ random_values,
-                              const unsigned long long grid_height,
-                              const unsigned long long grid_width) {
+                            const float* __restrict__ random_values,
+                            const long long grid_height,
+                            const long long grid_width) {
     // iterate over all agents in parallel and assign each of them
     // a strategy of either +1 or -1
     const long long  thread_id = static_cast<long long>(blockDim.x) * blockIdx.x + threadIdx.x;
@@ -72,8 +72,8 @@ __global__ void update_agents(signed char* agents,
                               const float alpha,
                               const float beta,
                               const float j,
-                              const unsigned long long grid_height,
-                              const unsigned long long grid_width) {
+                              const long long grid_height,
+                              const long long grid_width) {
     const long long thread_id = static_cast<long long>(blockDim.x) * blockIdx.x + threadIdx.x;
     const int row = thread_id / grid_width;
     const int col = thread_id % grid_width;
@@ -121,7 +121,7 @@ __global__ void update_agents(signed char* agents,
 }
 
 // Write lattice configuration to file
-void write_lattice(signed char *lattice_b, signed char *lattice_w, std::string filename, unsigned long long nx, unsigned long long ny) {
+void write_lattice(signed char *lattice_b, signed char *lattice_w, std::string filename, long long nx, long long ny) {
   signed char *lattice_h, *lattice_b_h, *lattice_w_h;
   lattice_h = (signed char*) malloc(nx * ny * sizeof(*lattice_h));
   lattice_b_h = (signed char*) malloc(nx * ny/2 * sizeof(*lattice_b_h));
@@ -160,26 +160,29 @@ void write_lattice(signed char *lattice_b, signed char *lattice_w, std::string f
 }
 
 
-void update(signed char *lattice_b, signed char *lattice_w, float* random_values, curandGenerator_t rng, float alpha,
-            float beta, float j, unsigned long long grid_height, unsigned long long grid_width) {
+void update(signed char *black_tiles, signed char *white_tiles,
+            float* random_values,
+            curandGenerator_t rng,
+            float alpha, float beta, float j,
+            long long grid_height, long long grid_width) {
   // Setup CUDA launch configuration
   int blocks = (grid_height * grid_width/2 + THREADS - 1) / THREADS;
 
   // Update black tiles on "checkerboard"
-  CHECK_CURAND(curandGenerateUniform(rng, random_values, grid_height*grid_width/2));
+  CHECK_CURAND(curandGenerateUniform(rng, random_values, grid_height * grid_width / 2));
   update_agents<true><<<blocks, THREADS>>>(lattice_b, lattice_w, random_values, alpha, beta, j, grid_height, grid_width/2);
 
   // Update white tiles on "checkerboard"
-  CHECK_CURAND(curandGenerateUniform(rng, random_values, grid_height*grid_width/2));
+  CHECK_CURAND(curandGenerateUniform(rng, random_values, grid_height * grid_width / 2));
   update_agents<false><<<blocks, THREADS>>>(lattice_w, lattice_b, random_values, alpha, beta, j, grid_height, grid_width/2);
 }
 
 
 int main() {
     // Default parameters
-    unsigned long long grid_height = 2048;
-    unsigned long long grid_width = 2048;
-    int warmup_iterations = 1000;
+    int device_id = 0;
+    long long grid_height = 2048;
+    long long grid_width = 2048;
     int total_iterations = 10000;
     int updates_between_saves = 200;
     bool save_to_file = false;
@@ -188,13 +191,19 @@ int main() {
     float j = 1.0f;
     float beta = 1 / 1.5f;
 
+    // searches for available cuda devices
+    int device_count;
+    checkCudaErrors(cudaGetDeviceCount(&device_count));
+    printf("Found %d cuda device(s)\n", device_count);
+
+    // finds and sets the specified cuda device
+    findCudaDevice(device_id);
+
+    // Finds and prints the devices name and computing power
     cudaDeviceProp deviceProp;
     deviceProp.major = 0;
     deviceProp.minor = 0;
-    // Use command-line specified CUDA device, otherwise use device with highest Gflops/s
-    // command-line input is given as 0, 0
-    int dev = findCudaDevice(0, 0);
-    checkCudaErrors(cudaGetDeviceProperties(&deviceProp, dev));
+    checkCudaErrors(cudaGetDeviceProperties(&deviceProp, device_id));
     printf("CUDA device [%s] has %d Multi-Processors, Compute %d.%d\n",
         deviceProp.name, deviceProp.multiProcessorCount, deviceProp.major, deviceProp.minor);
 
@@ -202,35 +211,32 @@ int main() {
     curandGenerator_t rng;
     CHECK_CURAND(curandCreateGenerator(&rng, CURAND_RNG_PSEUDO_PHILOX4_32_10));
     CHECK_CURAND(curandSetPseudoRandomGeneratorSeed(rng, seed));
-    float *random_values;
-    CHECK_CUDA(cudaMalloc(&random_values, grid_height * grid_width/2 * sizeof(*random_values)));
 
-    // Set up black and white lattice arrays on device
+    // allocate memory for lattice and random numbers on both devices
     signed char *black_tiles, *white_tiles;
+    float *random_values;
+    // allocate memory for the arrays
+    CHECK_CUDA(cudaMalloc(&white_tiles, grid_height * grid_width/2 * sizeof(*white_tiles)))
     CHECK_CUDA(cudaMalloc(&black_tiles, grid_height * grid_width/2 * sizeof(*black_tiles)));
-    CHECK_CUDA(cudaMalloc(&white_tiles, grid_height * grid_width/2 * sizeof(*white_tiles)));
+    CHECK_CUDA(cudaMalloc(&random_values, grid_height * grid_width / 2 * sizeof(*random_values)));
 
     int blocks = (grid_height * grid_width/2 + THREADS - 1) / THREADS;
-    CHECK_CURAND(curandGenerateUniform(rng, random_values, grid_height*grid_width/2));
-    init_agents<<<blocks, THREADS>>>(black_tiles, random_values, grid_height, grid_width/2);
-    CHECK_CURAND(curandGenerateUniform(rng, random_values, grid_height*grid_width/2));
-    init_agents<<<blocks, THREADS>>>(white_tiles, random_values, grid_height, grid_width/2);
+    CHECK_CURAND(curandGenerateUniform(rng, d0_random_values, grid_height * grid_width / 2));
+    init_agents<<<blocks, THREADS>>>(black_tiles, d0_random_values, grid_height, grid_width / 2);
+    CHECK_CURAND(curandGenerateUniform(rng, d1_random_values, grid_height * grid_width / 2));
+    init_agents<<<blocks, THREADS>>>(white_tiles, d1_random_values, grid_height, grid_width / 2);
 
-    // Warmup iterations
-    printf("Starting warmup...\n");
-    for (int i = 0; i < warmup_iterations; i++)
-        update(black_tiles, white_tiles, random_values, rng, alpha, beta, j, grid_height, grid_width);
     // Synchronize operations on the GPU with CPU
     CHECK_CUDA(cudaDeviceSynchronize());
 
-    printf("Starting trial iterations...\n");
     ProgressBar progress_bar = ProgressBar(total_iterations, grid_height, grid_width);
     timer::time_point start = timer::now();
     progress_bar.start();
     for (int iteration = 0; iteration < total_iterations; iteration++) {
-        update(black_tiles, white_tiles, random_values, rng, alpha, beta, j, grid_height, grid_width);
+        update(d0_black_tiles, d1_white_tiles, d0_random_values, d1_random_values,
+               rng, alpha, beta, j, grid_height, grid_width);
         progress_bar.next();
-        if (iteration % updates_between_saves == 0) {
+        if (iteration % updates_between_saves == 0 && save_to_file) {
             std::string filename = "saves/frame_" + std::to_string(iteration / updates_between_saves) + ".dat";
             write_lattice(black_tiles, white_tiles, filename, grid_height, grid_width);
         }
@@ -242,12 +248,10 @@ int main() {
 
     double duration = (double) std::chrono::duration_cast<std::chrono::microseconds>(stop-start).count();
     printf("REPORT:\n");
-    printf("\tnGPUs: %d\n", 1);
     printf("\talpha: %f\n", alpha);
     printf("\tbeta: %f\n", beta);
     printf("\tj: %f\n", j);
     printf("\tseed: %u\n", seed);
-    printf("\twarmup iterations: %d\n", warmup_iterations);
     printf("\ttrial iterations: %d\n", total_iterations);
     printf("\tlattice dimensions: %lld x %lld\n", grid_height, grid_width);
     printf("\telapsed time: %f sec\n", duration * 1e-6);

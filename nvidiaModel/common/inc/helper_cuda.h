@@ -1,4 +1,4 @@
-/**
+/*
  * Copyright 1993-2017 NVIDIA Corporation.  All rights reserved.
  *
  * Please refer to the NVIDIA end user license agreement (EULA) associated
@@ -719,57 +719,55 @@ inline const char* _ConvertSMVer2ArchName(int major, int minor) {
 
 #ifdef __CUDA_RUNTIME_H__
 // General GPU Device CUDA Initialization
-inline int gpuDeviceInit(int devID) {
-  int device_count;
-  checkCudaErrors(cudaGetDeviceCount(&device_count));
+inline int gpuDeviceInit(int device_id) {
+    int device_count;
+    checkCudaErrors(cudaGetDeviceCount(&device_count));
 
-  if (device_count == 0) {
-    fprintf(stderr,
-            "gpuDeviceInit() CUDA error: "
-            "no devices supporting CUDA.\n");
+    if (device_count == 0) {
+        fprintf(stderr,
+                "gpuDeviceInit() CUDA error: "
+                "no devices supporting CUDA.\n");
     exit(EXIT_FAILURE);
-  }
+    }
 
-  if (devID < 0) {
-    devID = 0;
-  }
+    if (device_id < 0) {
+        device_id = 0;
+    }
 
-  if (devID > device_count - 1) {
-    fprintf(stderr, "\n");
-    fprintf(stderr, ">> %d CUDA capable GPU device(s) detected. <<\n",
-            device_count);
-    fprintf(stderr,
-            ">> gpuDeviceInit (-device=%d) is not a valid"
-            " GPU device. <<\n",
-            devID);
-    fprintf(stderr, "\n");
-    return -devID;
-  }
+    if (device_id > device_count - 1) {
+        fprintf(stderr, "\n");
+        fprintf(stderr, ">> %d CUDA capable GPU device(s) detected. <<\n",
+                device_count);
+        fprintf(stderr,
+                ">> gpuDeviceInit (-device=%d) is not a valid"
+                " GPU device. <<\n",
+                device_id);
+        fprintf(stderr, "\n");
+        return -device_id;
+    }
 
-  int computeMode = -1, major = 0, minor = 0;
-  checkCudaErrors(cudaDeviceGetAttribute(&computeMode, cudaDevAttrComputeMode, devID));
-  checkCudaErrors(cudaDeviceGetAttribute(&major, cudaDevAttrComputeCapabilityMajor, devID));
-  checkCudaErrors(cudaDeviceGetAttribute(&minor, cudaDevAttrComputeCapabilityMinor, devID));
-  if (computeMode == cudaComputeModeProhibited) {
-    fprintf(stderr,
-            "Error: device is running in <Compute Mode "
-            "Prohibited>, no threads can use cudaSetDevice().\n");
-    return -1;
-  }
+    int computeMode = -1, major = 0, minor = 0;
+    checkCudaErrors(cudaDeviceGetAttribute(&computeMode, cudaDevAttrComputeMode, device_id));
+    checkCudaErrors(cudaDeviceGetAttribute(&major, cudaDevAttrComputeCapabilityMajor, device_id));
+    checkCudaErrors(cudaDeviceGetAttribute(&minor, cudaDevAttrComputeCapabilityMinor, device_id));
+    if (computeMode == cudaComputeModeProhibited) {
+        fprintf(stderr,
+                "Error: device is running in <Compute Mode "
+                "Prohibited>, no threads can use cudaSetDevice().\n");
+        return -1;
+    }
 
-  if (major < 1) {
-    fprintf(stderr, "gpuDeviceInit(): GPU device does not support CUDA.\n");
-    exit(EXIT_FAILURE);
-  }
+    if (major < 1) {
+        fprintf(stderr, "gpuDeviceInit(): GPU device does not support CUDA.\n");
+        exit(EXIT_FAILURE);
+    }
 
-  checkCudaErrors(cudaSetDevice(devID));
-  printf("gpuDeviceInit() CUDA Device [%d]: \"%s\n", devID, _ConvertSMVer2ArchName(major, minor));
-
-  return devID;
+    checkCudaErrors(cudaSetDevice(device_id));
+    return device_id;
 }
 
 // This function returns the best GPU (with maximum GFLOPS)
-inline int gpuGetMaxGflopsDeviceId() {
+inline int gpuGetMaxGflopsdevice_id() {
   int current_device = 0, sm_per_multiproc = 0;
   int max_perf_device = 0;
   int device_count = 0;
@@ -780,7 +778,7 @@ inline int gpuGetMaxGflopsDeviceId() {
 
   if (device_count == 0) {
     fprintf(stderr,
-            "gpuGetMaxGflopsDeviceId() CUDA error:"
+            "gpuGetMaxGflopsdevice_id() CUDA error:"
             " no devices supporting CUDA.\n");
     exit(EXIT_FAILURE);
   }
@@ -833,7 +831,7 @@ inline int gpuGetMaxGflopsDeviceId() {
 
   if (devices_prohibited == device_count) {
     fprintf(stderr,
-            "gpuGetMaxGflopsDeviceId() CUDA error:"
+            "gpuGetMaxGflopsdevice_id() CUDA error:"
             " all devices have compute mode prohibited.\n");
     exit(EXIT_FAILURE);
   }
@@ -841,38 +839,19 @@ inline int gpuGetMaxGflopsDeviceId() {
   return max_perf_device;
 }
 
-// Initialization code to find the best CUDA Device
-inline int findCudaDevice(int argc, const char **argv) {
-  int devID = 0;
-
-  // If the command-line has a device number specified, use it
-  if (checkCmdLineFlag(argc, argv, "device")) {
-    devID = getCmdLineArgumentInt(argc, argv, "device=");
-
-    if (devID < 0) {
-      printf("Invalid command line parameter\n ");
-      exit(EXIT_FAILURE);
-    } else {
-      devID = gpuDeviceInit(devID);
-
-      if (devID < 0) {
-        printf("exiting...\n");
+inline void findCudaDevice(int device_id) {
+    if (device_id < 0) {
+        printf("Invalid device number %d\n ", device_id);
         exit(EXIT_FAILURE);
-      }
     }
-  } else {
-    // Otherwise pick the device with highest Gflops/s
-    devID = gpuGetMaxGflopsDeviceId();
-    checkCudaErrors(cudaSetDevice(devID));
-    int major = 0, minor = 0; 
-    checkCudaErrors(cudaDeviceGetAttribute(&major, cudaDevAttrComputeCapabilityMajor, devID));
-    checkCudaErrors(cudaDeviceGetAttribute(&minor, cudaDevAttrComputeCapabilityMinor, devID));
-    printf("GPU Device %d: \"%s\" with compute capability %d.%d\n\n",
-           devID, _ConvertSMVer2ArchName(major, minor), major, minor);
+    else {
+        device_id = gpuDeviceInit(device_id);
 
-  }
-
-  return devID;
+        if (device_id < 0) {
+            printf("Internal Error...\n");
+            exit(EXIT_FAILURE);
+        }
+    }
 }
 
 inline int findIntegratedGPU() {
@@ -897,7 +876,7 @@ inline int findIntegratedGPU() {
     if (integrated && (computeMode != cudaComputeModeProhibited)) {
       checkCudaErrors(cudaSetDevice(current_device));
 
-      int major = 0, minor = 0; 
+      int major = 0, minor = 0;
       checkCudaErrors(cudaDeviceGetAttribute(&major, cudaDevAttrComputeCapabilityMajor, current_device));
       checkCudaErrors(cudaDeviceGetAttribute(&minor, cudaDevAttrComputeCapabilityMinor, current_device));
       printf("GPU Device %d: \"%s\" with compute capability %d.%d\n\n",

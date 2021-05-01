@@ -1,2 +1,1 @@
-conda activate spyder
-python
+ffmpeg -pattern_type sequence -i snapshots/frame_%d.png -c:v libx264 -vf "fps=15,format=yuv420p" -y simulation.mp4
