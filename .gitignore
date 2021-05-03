@@ -1,9 +1,9 @@
-nvidiaModel/build/
+cudaModel/build/
 .idea/
 .vs/
-nvidiaModel/compiling.txt
-nvidiaModel/nvidiaModel.vcxproj
-nvidiaModel/nvidiaModel.vcxproj.user
-nvidiaModel/snapshots/
-nvidiaModel/rendering.txt
-nvidiaModel/simulation.mp4
+cudaModel/compiling.txt
+cudaModel/cudaModel.vcxproj
+cudaModel/cudaModel.vcxproj.user
+cudaModel/snapshots/
+cudaModel/rendering.txt
+cudaModel/simulation.mp4
