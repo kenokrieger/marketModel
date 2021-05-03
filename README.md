@@ -1,7 +1,12 @@
+# Ising Market Model
+
+<img src="https://img.shields.io/github/issues/kenokrieger/marketModel"> <img src="https://img.shields.io/github/commit-activity/m/kenokrieger/marketModel">
+<img src="http://qmpy.org/badges/license.svg">
+
 Modified source code from the Ising Model built by
 <a href="https://github.com/romerojosh">Joshua Romero</a>.
 
-# Compiling
+## Compiling
 
 To compile the code on Windows 10 you need to have Microsoft Visual Studio
 2019 installed. With that comes the file vcvarsall.bat which is needed to
