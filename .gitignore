@@ -1,9 +1,4 @@
+*.mp4
+*.png
 cudaModel/build/
-.idea/
-.vs/
-cudaModel/compiling.txt
-cudaModel/cudaModel.vcxproj
-cudaModel/cudaModel.vcxproj.user
 cudaModel/snapshots/
-cudaModel/rendering.txt
-cudaModel/simulation.mp4
