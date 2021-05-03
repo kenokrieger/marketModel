@@ -109,11 +109,11 @@ __global__ void update_agents(signed char* agents,
           );
 
     signed char old_strategy = agents[row * grid_width + col];
-    double market_coupling = -alpha / pow(grid_width, 2) * abs(GLOBAL_MARKET);
+    double market_coupling = -alpha / (grid_width * grid_height) * abs(GLOBAL_MARKET);
     double field = neighbor_coupling + market_coupling * old_strategy;
     // Determine whether to flip spin
     float probability = 1 / (1 + exp(-2.0 * beta * field));
-    signed char new_strategy = random_values[row * grid_width + col] < probability ? -1 : 1;
+    signed char new_strategy = random_values[row * grid_width + col] < probability ? 1 : -1;
     agents[row * grid_width + col] = new_strategy;
     // If the strategy was changed remove the old value from the sum and add the new value.
     if (new_strategy != old_strategy)
@@ -170,22 +170,22 @@ void update(signed char *black_tiles, signed char *white_tiles,
 
   // Update black tiles on "checkerboard"
   CHECK_CURAND(curandGenerateUniform(rng, random_values, grid_height * grid_width / 2));
-  update_agents<true><<<blocks, THREADS>>>(lattice_b, lattice_w, random_values, alpha, beta, j, grid_height, grid_width/2);
+  update_agents<true><<<blocks, THREADS>>>(black_tiles, white_tiles, random_values, alpha, beta, j, grid_height, grid_width/2);
 
   // Update white tiles on "checkerboard"
   CHECK_CURAND(curandGenerateUniform(rng, random_values, grid_height * grid_width / 2));
-  update_agents<false><<<blocks, THREADS>>>(lattice_w, lattice_b, random_values, alpha, beta, j, grid_height, grid_width/2);
+  update_agents<false><<<blocks, THREADS>>>(white_tiles, black_tiles, random_values, alpha, beta, j, grid_height, grid_width/2);
 }
 
 
 int main() {
     // Default parameters
     int device_id = 0;
-    long long grid_height = 2048;
-    long long grid_width = 2048;
-    int total_iterations = 10000;
-    int updates_between_saves = 200;
-    bool save_to_file = false;
+    long long grid_height = 5 * 2048;
+    long long grid_width = 5 * 2048;
+    int total_iterations = 4000000;
+    int updates_between_saves = 2000;
+    bool save_to_file = true;
     unsigned int seed = std::chrono::steady_clock::now().time_since_epoch().count();
     float alpha = 4.0f;
     float j = 1.0f;
@@ -221,10 +221,10 @@ int main() {
     CHECK_CUDA(cudaMalloc(&random_values, grid_height * grid_width / 2 * sizeof(*random_values)));
 
     int blocks = (grid_height * grid_width/2 + THREADS - 1) / THREADS;
-    CHECK_CURAND(curandGenerateUniform(rng, d0_random_values, grid_height * grid_width / 2));
-    init_agents<<<blocks, THREADS>>>(black_tiles, d0_random_values, grid_height, grid_width / 2);
-    CHECK_CURAND(curandGenerateUniform(rng, d1_random_values, grid_height * grid_width / 2));
-    init_agents<<<blocks, THREADS>>>(white_tiles, d1_random_values, grid_height, grid_width / 2);
+    CHECK_CURAND(curandGenerateUniform(rng, random_values, grid_height * grid_width / 2));
+    init_agents<<<blocks, THREADS>>>(black_tiles, random_values, grid_height, grid_width / 2);
+    CHECK_CURAND(curandGenerateUniform(rng, random_values, grid_height * grid_width / 2));
+    init_agents<<<blocks, THREADS>>>(white_tiles, random_values, grid_height, grid_width / 2);
 
     // Synchronize operations on the GPU with CPU
     CHECK_CUDA(cudaDeviceSynchronize());
@@ -233,8 +233,8 @@ int main() {
     timer::time_point start = timer::now();
     progress_bar.start();
     for (int iteration = 0; iteration < total_iterations; iteration++) {
-        update(d0_black_tiles, d1_white_tiles, d0_random_values, d1_random_values,
-               rng, alpha, beta, j, grid_height, grid_width);
+        update(black_tiles, white_tiles, random_values, rng,
+               alpha, beta, j, grid_height, grid_width);
         progress_bar.next();
         if (iteration % updates_between_saves == 0 && save_to_file) {
             std::string filename = "saves/frame_" + std::to_string(iteration / updates_between_saves) + ".dat";
