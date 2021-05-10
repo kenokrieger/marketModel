@@ -27,6 +27,9 @@
 #include <string>
 #include<conio.h>
 
+#include <GL/glut.h>
+#include <GL/freeglut_std.h>
+
 #include "ProgressBar.h"
 
 #include <cuda_fp16.h>
@@ -43,6 +46,23 @@
 
 #define timer std::chrono::high_resolution_clock
 #define THREADS 128
+
+// Default parameters
+int device_id = 0;
+long long grid_height = 5 * 2048;
+long long grid_width = 5 * 2048;
+int total_iterations = 1000;
+unsigned int seed = std::chrono::steady_clock::now().time_since_epoch().count();
+float alpha = 4.0f;
+float j = 1.0f;
+float beta = 1 / 1.5f;
+
+signed char *black_tiles, *white_tiles;
+float *random_values;
+curandGenerator_t rng;
+signed char *h_black_tiles, *h_white_tiles;
+
+bool VISUALISE = true;
 
 // The global market represents the sum over the strategies of each
 // agent. Agents will choose a strategy contrary to the sign of the
@@ -117,6 +137,7 @@ __global__ void update_agents(signed char* agents,
     float probability = 1 / (1 + exp(-2.0 * beta * field));
     signed char new_strategy = random_values[row * grid_width + col] < probability ? 1 : -1;
     agents[row * grid_width + col] = new_strategy;
+    __syncthreads();
     // If the strategy was changed remove the old value from the sum and add the new value.
     if (new_strategy != old_strategy)
         GLOBAL_MARKET -= 2 * old_strategy;
@@ -165,7 +186,6 @@ void write_lattice(signed char *lattice_b, signed char *lattice_w, std::string f
   progress_bar.end();
 }
 
-
 void update(signed char *black_tiles, signed char *white_tiles,
             float* random_values,
             curandGenerator_t rng,
@@ -183,18 +203,95 @@ void update(signed char *black_tiles, signed char *white_tiles,
   update_agents<false><<<blocks, THREADS>>>(white_tiles, black_tiles, random_values, alpha, beta, j, grid_height, grid_width/2);
 }
 
+void reshape(int width, int height)
+{
+	glViewport(0, 0, (GLsizei)width, (GLsizei)height);
+	glMatrixMode(GL_PROJECTION);
+	glLoadIdentity();
+	gluOrtho2D(0, 1000, 0, 1000);
+	glMatrixMode(GL_MODELVIEW);
+}
 
-int main() {
-    // Default parameters
-    int device_id = 0;
-    long long grid_height = 5 * 2048;
-    long long grid_width = 5 * 2048;
-    int total_iterations = 40000000;
-    unsigned int seed = std::chrono::steady_clock::now().time_since_epoch().count();
-    float alpha = 4.0f;
-    float j = 1.0f;
-    float beta = 1 / 1.5f;
+void render()
+{
+  update(black_tiles, white_tiles, random_values, rng, alpha, beta, j, grid_height, grid_width);
 
+  if (kbhit()) {
+    char pressed_key = getch();
+    // if the pressed key is "esc"
+    if (pressed_key == 27) exit(0);
+    if (VISUALISE)
+    {
+      VISUALISE = false;
+      printf("Visualisation paused...\n");
+    }
+    else
+    {
+      VISUALISE = true;
+      printf("Visualation continued...\n");
+    }
+  }
+  if (!VISUALISE) return;
+
+  CHECK_CUDA(cudaMemcpy(h_black_tiles, black_tiles, grid_height * grid_width / 2 * sizeof(*black_tiles), cudaMemcpyDeviceToHost));
+  CHECK_CUDA(cudaMemcpy(h_white_tiles, white_tiles, grid_height * grid_width / 2 * sizeof(*white_tiles), cudaMemcpyDeviceToHost));
+
+  glClear(GL_COLOR_BUFFER_BIT);
+  glLoadIdentity();
+
+  float size = 1 / (double)grid_width * 1000;
+
+  for (int row = 0; row < grid_width; row++)
+  {
+    for (int col = 0; col < grid_height; col++)
+    {
+      if (row % 2)
+      {
+        if (col % 2)
+        {
+          if (h_black_tiles[row * grid_width / 2 + col / 2] == -1) continue;
+        }
+        else
+        {
+          if (h_white_tiles[row * grid_width / 2 + col / 2] == -1) continue;
+        }
+      }
+      else
+      {
+        if (col % 2)
+        {
+          if (h_white_tiles[row * grid_width / 2 + col / 2] == -1) continue;
+        }
+        else
+        {
+          if (h_black_tiles[row * grid_width / 2 + col / 2] == -1) continue;
+        }
+      }
+
+      float xpos = col / (double)grid_width * 1000;
+      float ypos = row / (double)grid_width * 1000;
+
+      glBegin(GL_POLYGON);
+
+      glVertex2f(xpos, ypos);
+      glVertex2f(xpos, ypos + size);
+      glVertex2f(xpos + size, ypos + size);
+      glVertex2f(xpos + size, ypos);
+
+      glEnd();
+    }
+  }
+  glutSwapBuffers();
+}
+
+void new_frame(int)
+{
+    int fps = 1;
+    glutPostRedisplay();
+    // set frame rate to x fps (1 / x calls per second)
+    glutTimerFunc(1e3 / fps, new_frame, 0);
+}
+int main(int argc, char** argv) {
     // searches for available cuda devices
     int device_count;
     checkCudaErrors(cudaGetDeviceCount(&device_count));
@@ -212,17 +309,15 @@ int main() {
         deviceProp.name, deviceProp.multiProcessorCount, deviceProp.major, deviceProp.minor);
 
     // Set up cuRAND generator
-    curandGenerator_t rng;
     CHECK_CURAND(curandCreateGenerator(&rng, CURAND_RNG_PSEUDO_PHILOX4_32_10));
     CHECK_CURAND(curandSetPseudoRandomGeneratorSeed(rng, seed));
 
-    // allocate memory for lattice and random numbers on both devices
-    signed char *black_tiles, *white_tiles;
-    float *random_values;
     // allocate memory for the arrays
     CHECK_CUDA(cudaMalloc(&white_tiles, grid_height * grid_width/2 * sizeof(*white_tiles)))
     CHECK_CUDA(cudaMalloc(&black_tiles, grid_height * grid_width/2 * sizeof(*black_tiles)));
     CHECK_CUDA(cudaMalloc(&random_values, grid_height * grid_width / 2 * sizeof(*random_values)));
+    h_black_tiles = (signed char*)malloc(grid_height * grid_width / 2 * sizeof(*h_black_tiles));
+    h_white_tiles = (signed char*)malloc(grid_height * grid_width / 2 * sizeof(*h_white_tiles));
 
     int blocks = (grid_height * grid_width/2 + THREADS - 1) / THREADS;
     CHECK_CURAND(curandGenerateUniform(rng, random_values, grid_height * grid_width / 2));
@@ -233,25 +328,23 @@ int main() {
     // Synchronize operations on the GPU with CPU
     CHECK_CUDA(cudaDeviceSynchronize());
 
-    ProgressBar progress_bar = ProgressBar(total_iterations);
     timer::time_point start = timer::now();
-    progress_bar.start();
-    for (int iteration = 0; iteration < total_iterations; iteration++) {
-        update(black_tiles, white_tiles, random_values, rng,
-               alpha, beta, j, grid_height, grid_width);
-        progress_bar.next();
+    glutInit(&argc, argv);
+  	glutInitDisplayMode(GLUT_RGB);
 
-        if (kbhit()) {
-            getch();
-            progress_bar.pause();
-            std::string filename = "saves/frame_" + std::to_string(iteration) + ".dat";
-            printf("\nSaving current iteration to file...\n");
-            write_lattice(black_tiles, white_tiles, filename, grid_height, grid_width);
-            printf("Resuming computation...\n");
-            progress_bar.resume();
-        }
-    }
-    progress_bar.end();
+  	// centers the window horizontally on the screen and vertically at the top
+  	glutInitWindowPosition((glutGet(GLUT_SCREEN_WIDTH) - 1000) / 2, 0);
+  	glutInitWindowSize(1000, 1000);
+
+  	glutCreateWindow("Market Model");
+
+    glClearColor(0.0, 0.0, 0.0, 1.0);
+  	glutDisplayFunc(render);
+  	glutReshapeFunc(reshape);
+
+  	glutTimerFunc(0, new_frame, 0);
+
+  	glutMainLoop();
 
     CHECK_CUDA(cudaDeviceSynchronize());
     timer::time_point stop = timer::now();

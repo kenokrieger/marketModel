@@ -24,7 +24,7 @@ This should configure the terminal to find all paths needed for compilation.
 Then compile the code with the nvcc-compiler.
 
 ```terminal
-nvcc -l curand -I common\inc kernel.cu ProgressBar.cpp -o build\model.exe
+nvcc -l curand -I common\inc -I Libraries\include --library-path Libraries\lib kernel.cu ProgressBar.cpp -o build\model.exe
 ```
 
 The -l option tells the compiler that the curand library is used. The -I option
