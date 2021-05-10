@@ -7,6 +7,8 @@ import time
 overwrite = False
 data_directory = "build/saves/"
 saves_directory = "snapshots/"
+plot_multiple = False
+frame_number = 12000246
 
 def save_color_map(data_directory, saves_directory):
     for frame in listdir(data_directory):
@@ -30,6 +32,23 @@ def save_color_map(data_directory, saves_directory):
         remove(data_file_path)
 
 
+def save_frame(data_directory, saves_directory, frame_number):
+    frame = "frame_{}.dat".format(frame_number)
+    img_path = saves_directory + frame.replace(".dat", ".png")
+    data_file_path = data_directory + frame
+    print("Plotting {}".format(frame))
+    agents = loadtxt(data_file_path)
+    fig, ax = subplots(figsize=(8, 8))
+    ax.set_xticks([])
+    ax.set_yticks([])
+    ax.imshow(agents, cmap="copper")
+    savefig(img_path)
+    close(fig)
+
+
 if __name__ == "__main__":
-    while True:
-        save_color_map(data_directory, saves_directory)
+    if not plot_multiple:
+        save_frame(data_directory, saves_directory, frame_number)
+    else:
+        while True:
+            save_color_map(data_directory, saves_directory)

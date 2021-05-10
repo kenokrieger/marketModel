@@ -25,6 +25,8 @@
 #include <fstream>
 #include <iostream>
 #include <string>
+#include<conio.h>
+
 #include "ProgressBar.h"
 
 #include <cuda_fp16.h>
@@ -123,13 +125,14 @@ __global__ void update_agents(signed char* agents,
 // Write lattice configuration to file
 void write_lattice(signed char *lattice_b, signed char *lattice_w, std::string filename, long long nx, long long ny) {
   signed char *lattice_h, *lattice_b_h, *lattice_w_h;
+  ProgressBar progress_bar = ProgressBar(nx);
   lattice_h = (signed char*) malloc(nx * ny * sizeof(*lattice_h));
   lattice_b_h = (signed char*) malloc(nx * ny/2 * sizeof(*lattice_b_h));
   lattice_w_h = (signed char*) malloc(nx * ny/2 * sizeof(*lattice_w_h));
 
   CHECK_CUDA(cudaMemcpy(lattice_b_h, lattice_b, nx * ny/2 * sizeof(*lattice_b), cudaMemcpyDeviceToHost));
   CHECK_CUDA(cudaMemcpy(lattice_w_h, lattice_b, nx * ny/2 * sizeof(*lattice_w), cudaMemcpyDeviceToHost));
-
+  progress_bar.start();
   for (int i = 0; i < nx; i++) {
     for (int j = 0; j < ny/2; j++) {
       if (i % 2) {
@@ -143,9 +146,11 @@ void write_lattice(signed char *lattice_b, signed char *lattice_w, std::string f
   }
 
   std::ofstream f;
+  progress_bar.start();
   f.open(filename);
   if (f.is_open()) {
     for (int i = 0; i < nx; i++) {
+      progress_bar.next();
       for (int j = 0; j < ny; j++) {
          f << (int)lattice_h[i * ny + j] << " ";
       }
@@ -157,6 +162,7 @@ void write_lattice(signed char *lattice_b, signed char *lattice_w, std::string f
   free(lattice_h);
   free(lattice_b_h);
   free(lattice_w_h);
+  progress_bar.end();
 }
 
 
@@ -183,9 +189,7 @@ int main() {
     int device_id = 0;
     long long grid_height = 5 * 2048;
     long long grid_width = 5 * 2048;
-    int total_iterations = 4000000;
-    int updates_between_saves = 2000;
-    bool save_to_file = true;
+    int total_iterations = 40000000;
     unsigned int seed = std::chrono::steady_clock::now().time_since_epoch().count();
     float alpha = 4.0f;
     float j = 1.0f;
@@ -229,16 +233,22 @@ int main() {
     // Synchronize operations on the GPU with CPU
     CHECK_CUDA(cudaDeviceSynchronize());
 
-    ProgressBar progress_bar = ProgressBar(total_iterations, grid_height, grid_width);
+    ProgressBar progress_bar = ProgressBar(total_iterations);
     timer::time_point start = timer::now();
     progress_bar.start();
     for (int iteration = 0; iteration < total_iterations; iteration++) {
         update(black_tiles, white_tiles, random_values, rng,
                alpha, beta, j, grid_height, grid_width);
         progress_bar.next();
-        if (iteration % updates_between_saves == 0 && save_to_file) {
-            std::string filename = "saves/frame_" + std::to_string(iteration / updates_between_saves) + ".dat";
+
+        if (kbhit()) {
+            getch();
+            progress_bar.pause();
+            std::string filename = "saves/frame_" + std::to_string(iteration) + ".dat";
+            printf("\nSaving current iteration to file...\n");
             write_lattice(black_tiles, white_tiles, filename, grid_height, grid_width);
+            printf("Resuming computation...\n");
+            progress_bar.resume();
         }
     }
     progress_bar.end();

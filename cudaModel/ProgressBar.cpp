@@ -9,11 +9,9 @@ using namespace std;
 #define timer std::chrono::high_resolution_clock
 
 
-ProgressBar::ProgressBar(int max_iterations, int grid_height, int grid_width) {
+ProgressBar::ProgressBar(int max_iterations) {
     total_iterations = max_iterations;
-    number_of_agents = grid_height * grid_width;
     progress_start = timer::now();
-    last_call = timer::now();
 }
 
 void ProgressBar::show() {
@@ -24,7 +22,6 @@ void ProgressBar::show() {
 
     cout << '\r';
     cout << out << '[' << setw(log10(total_iterations) + 2) << current_iteration << '/' << total_iterations;
-    cout << " @ " << calculate_flips_per_ns() << " iterations/second";
     cout << " eta " << convert_to_time(calculate_eta()) << "]";
     // write some spaces at the end to overwrite old brackets
     // and return cursor to the end of the output
@@ -39,17 +36,8 @@ float ProgressBar::calculate_eta() {
       eta = -1;
     else
       // The estimated time is calculated as remaining_computations * mean_time_per_computation
-      eta = (total_iterations / (float)current_iteration - 1) * time_since_start.count() * 1e-6;
+      eta = (total_iterations / (float)current_iteration - 1) * (time_since_start.count() - pause_duration) * 1e-6;
     return eta;
-}
-double ProgressBar::calculate_flips_per_ns() {
-    double flips_per_ns;
-    timer::time_point now = timer::now();
-    std::chrono::duration<long, std::nano> duration = now - last_call;
-    double time_elapsed = duration.count();
-    flips_per_ns = 1 / time_elapsed * 1e9;
-    last_call = timer::now();
-    return flips_per_ns;
 }
 
 string ProgressBar::convert_to_time(float time_duration) {
@@ -79,7 +67,20 @@ void ProgressBar::next() {
     show();
 }
 
+void ProgressBar::pause() {
+    pause_start = std::chrono::high_resolution_clock::now();
+}
+
+void ProgressBar::resume() {
+    timer::time_point now = timer::now();
+    auto time_since_pause = chrono::duration_cast<chrono::microseconds>(now - pause_start);
+    pause_duration += time_since_pause.count();
+}
+
 void ProgressBar::end() {
-    show();
-    cout << '\n';
+    timer::time_point now = timer::now();
+    auto time_since_start = chrono::duration_cast<chrono::microseconds>(now - progress_start);
+    float total_duration = time_since_start.count() * 1e-6;
+    cout << "Process finished in " << total_duration << " s\n";
+    cout << "at an average of " << total_iterations / total_duration << " per second" << endl;
 }

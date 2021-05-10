@@ -1,4 +1,4 @@
 *.mp4
 *.png
-cudaModel/build/
-cudaModel/snapshots/
+cudaModel/build/*
+cudaModel/snapshots/*
