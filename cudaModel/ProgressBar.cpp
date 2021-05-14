@@ -81,6 +81,6 @@ void ProgressBar::end() {
     timer::time_point now = timer::now();
     auto time_since_start = chrono::duration_cast<chrono::microseconds>(now - progress_start);
     float total_duration = time_since_start.count() * 1e-6;
-    cout << "Process finished in " << total_duration << " s\n";
+    cout << "\nProcess finished in " << total_duration << " s\n";
     cout << "at an average of " << total_iterations / total_duration << " per second" << endl;
 }

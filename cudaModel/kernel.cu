@@ -1,26 +1,3 @@
-/*
- * Copyright (c) 2019, NVIDIA CORPORATION. All rights reserved.
- *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
- *
- */
-
 #include <chrono>
 #include <fstream>
 #include <iostream>
@@ -49,13 +26,13 @@
 
 // Default parameters
 int device_id = 0;
-long long grid_height = 5 * 2048;
-long long grid_width = 5 * 2048;
-int total_iterations = 1000;
+const long long grid_height = 2048;
+const long long grid_width = 2048;
+int total_updates = 0;
 unsigned int seed = std::chrono::steady_clock::now().time_since_epoch().count();
-float alpha = 4.0f;
+float alpha = 0.0f;
 float j = 1.0f;
-float beta = 1 / 1.5f;
+float beta = 10 / 1.5f;
 
 signed char *black_tiles, *white_tiles;
 float *random_values;
@@ -67,7 +44,8 @@ bool VISUALISE = true;
 // The global market represents the sum over the strategies of each
 // agent. Agents will choose a strategy contrary to the sign of the
 // global market.
-__device__ int GLOBAL_MARKET = 0;
+int *d_global_market;
+int *h_global_market;
 
 
 __global__ void init_agents(signed char* agents,
@@ -91,6 +69,7 @@ template<bool is_black>
 __global__ void update_agents(signed char* agents,
                               const signed char* __restrict__ checkerboard_agents,
                               const float* __restrict__ random_values,
+                              int *d_global_market,
                               const float alpha,
                               const float beta,
                               const float j,
@@ -131,7 +110,7 @@ __global__ void update_agents(signed char* agents,
           );
 
     signed char old_strategy = agents[row * grid_width + col];
-    double market_coupling = -alpha / (grid_width * grid_height) * abs(GLOBAL_MARKET);
+    double market_coupling = -alpha / (grid_width * grid_height) * abs(d_global_market[0]);
     double field = neighbor_coupling + market_coupling * old_strategy;
     // Determine whether to flip spin
     float probability = 1 / (1 + exp(-2.0 * beta * field));
@@ -140,7 +119,7 @@ __global__ void update_agents(signed char* agents,
     __syncthreads();
     // If the strategy was changed remove the old value from the sum and add the new value.
     if (new_strategy != old_strategy)
-        GLOBAL_MARKET -= 2 * old_strategy;
+        d_global_market[0] -= 2 * old_strategy;
 }
 
 // Write lattice configuration to file
@@ -189,6 +168,7 @@ void write_lattice(signed char *lattice_b, signed char *lattice_w, std::string f
 void update(signed char *black_tiles, signed char *white_tiles,
             float* random_values,
             curandGenerator_t rng,
+            int *d_global_market,
             float alpha, float beta, float j,
             long long grid_height, long long grid_width) {
   // Setup CUDA launch configuration
@@ -196,11 +176,11 @@ void update(signed char *black_tiles, signed char *white_tiles,
 
   // Update black tiles on "checkerboard"
   CHECK_CURAND(curandGenerateUniform(rng, random_values, grid_height * grid_width / 2));
-  update_agents<true><<<blocks, THREADS>>>(black_tiles, white_tiles, random_values, alpha, beta, j, grid_height, grid_width/2);
+  update_agents<true><<<blocks, THREADS>>>(black_tiles, white_tiles, random_values, d_global_market, alpha, beta, j, grid_height, grid_width/2);
 
   // Update white tiles on "checkerboard"
   CHECK_CURAND(curandGenerateUniform(rng, random_values, grid_height * grid_width / 2));
-  update_agents<false><<<blocks, THREADS>>>(white_tiles, black_tiles, random_values, alpha, beta, j, grid_height, grid_width/2);
+  update_agents<false><<<blocks, THREADS>>>(white_tiles, black_tiles, random_values, d_global_market, alpha, beta, j, grid_height, grid_width/2);
 }
 
 void reshape(int width, int height)
@@ -214,21 +194,35 @@ void reshape(int width, int height)
 
 void render()
 {
-  update(black_tiles, white_tiles, random_values, rng, alpha, beta, j, grid_height, grid_width);
-
+  update(black_tiles, white_tiles, random_values, rng, d_global_market, alpha, beta, j, grid_height, grid_width);
+  total_updates += 1;
+  CHECK_CUDA(cudaMemcpy(h_global_market, d_global_market, sizeof(*d_global_market), cudaMemcpyDeviceToHost));
+  std::cout << "MARKET = " << h_global_market[0] << std::endl;
   if (kbhit()) {
     char pressed_key = getch();
     // if the pressed key is "esc"
-    if (pressed_key == 27) exit(0);
-    if (VISUALISE)
-    {
-      VISUALISE = false;
-      printf("Visualisation paused...\n");
+    if (pressed_key == 27) {
+      std::string exit_confirmation;
+      std::cout << "Exit? ";
+      std::cin >> exit_confirmation;
+      if (exit_confirmation == "y" || exit_confirmation == "Y")
+      {
+        write_lattice(black_tiles, white_tiles, "final_configuration.dat", grid_height, grid_width);
+        exit(0);
+      }
     }
-    else
+
+    if (pressed_key == 's')
     {
-      VISUALISE = true;
-      printf("Visualation continued...\n");
+      write_lattice(black_tiles, white_tiles, "snapshot.dat", grid_height, grid_width);
+    }
+
+    // if the pressed key is "spacebar"
+    if (pressed_key == 32)
+    {
+    const char* new_title = VISUALISE ? "Live View (paused)" : "Live View";
+    glutSetWindowTitle(new_title);
+    VISUALISE = !VISUALISE;
     }
   }
   if (!VISUALISE) return;
@@ -245,29 +239,14 @@ void render()
   {
     for (int col = 0; col < grid_height; col++)
     {
-      if (row % 2)
+      if (row % 2 == col % 2)
       {
-        if (col % 2)
-        {
-          if (h_black_tiles[row * grid_width / 2 + col / 2] == -1) continue;
-        }
-        else
-        {
-          if (h_white_tiles[row * grid_width / 2 + col / 2] == -1) continue;
-        }
+        if (h_black_tiles[row * grid_width / 2 + col / 2] == -1) continue;
       }
       else
       {
-        if (col % 2)
-        {
-          if (h_white_tiles[row * grid_width / 2 + col / 2] == -1) continue;
-        }
-        else
-        {
-          if (h_black_tiles[row * grid_width / 2 + col / 2] == -1) continue;
-        }
+        if (h_white_tiles[row * grid_width / 2 + col / 2] == -1) continue;
       }
-
       float xpos = col / (double)grid_width * 1000;
       float ypos = row / (double)grid_width * 1000;
 
@@ -284,13 +263,6 @@ void render()
   glutSwapBuffers();
 }
 
-void new_frame(int)
-{
-    int fps = 1;
-    glutPostRedisplay();
-    // set frame rate to x fps (1 / x calls per second)
-    glutTimerFunc(1e3 / fps, new_frame, 0);
-}
 int main(int argc, char** argv) {
     // searches for available cuda devices
     int device_count;
@@ -316,8 +288,10 @@ int main(int argc, char** argv) {
     CHECK_CUDA(cudaMalloc(&white_tiles, grid_height * grid_width/2 * sizeof(*white_tiles)))
     CHECK_CUDA(cudaMalloc(&black_tiles, grid_height * grid_width/2 * sizeof(*black_tiles)));
     CHECK_CUDA(cudaMalloc(&random_values, grid_height * grid_width / 2 * sizeof(*random_values)));
+    CHECK_CUDA(cudaMalloc(&d_global_market, sizeof(*d_global_market)));
     h_black_tiles = (signed char*)malloc(grid_height * grid_width / 2 * sizeof(*h_black_tiles));
     h_white_tiles = (signed char*)malloc(grid_height * grid_width / 2 * sizeof(*h_white_tiles));
+    h_global_market = (int*)malloc(sizeof(*h_global_market));
 
     int blocks = (grid_height * grid_width/2 + THREADS - 1) / THREADS;
     CHECK_CURAND(curandGenerateUniform(rng, random_values, grid_height * grid_width / 2));
@@ -328,66 +302,21 @@ int main(int argc, char** argv) {
     // Synchronize operations on the GPU with CPU
     CHECK_CUDA(cudaDeviceSynchronize());
 
-    timer::time_point start = timer::now();
     glutInit(&argc, argv);
   	glutInitDisplayMode(GLUT_RGB);
 
-  	// centers the window horizontally on the screen and vertically at the top
   	glutInitWindowPosition((glutGet(GLUT_SCREEN_WIDTH) - 1000) / 2, 0);
   	glutInitWindowSize(1000, 1000);
 
-  	glutCreateWindow("Market Model");
+  	glutCreateWindow("Live View");
 
-    glClearColor(0.0, 0.0, 0.0, 1.0);
+    glClearColor(0.1f, 0.35f, 0.71f, 1.0f);
   	glutDisplayFunc(render);
+    glutIdleFunc(render);
   	glutReshapeFunc(reshape);
-
-  	glutTimerFunc(0, new_frame, 0);
 
   	glutMainLoop();
 
     CHECK_CUDA(cudaDeviceSynchronize());
-    timer::time_point stop = timer::now();
-
-    double duration = (double) std::chrono::duration_cast<std::chrono::microseconds>(stop-start).count();
-    printf("REPORT:\n");
-    printf("\talpha: %f\n", alpha);
-    printf("\tbeta: %f\n", beta);
-    printf("\tj: %f\n", j);
-    printf("\tseed: %u\n", seed);
-    printf("\ttrial iterations: %d\n", total_iterations);
-    printf("\tlattice dimensions: %lld x %lld\n", grid_height, grid_width);
-    printf("\telapsed time: %f sec\n", duration * 1e-6);
-    printf("\tupdates per ns: %f\n", (double) (grid_height * grid_width) * total_iterations / duration * 1e-3);
-    std::cout << std::flush;
-
-    /*
-    // Reduce
-    double* device_sum;
-    int number_of_chunks = (grid_height * grid_width / 2 + CUB_CHUNK_SIZE - 1)/ CUB_CHUNK_SIZE;
-    CHECK_CUDA(cudaMalloc(&device_sum, 2 * number_of_chunks * sizeof(*device_sum)));
-    size_t cub_workspace_bytes = 0;
-    void* workspace = NULL;
-    CHECK_CUDA(cub::DeviceReduce::Sum(workspace, cub_workspace_bytes, black_tiles, device_sum, CUB_CHUNK_SIZE));
-    CHECK_CUDA(cudaMalloc(&workspace, cub_workspace_bytes));
-    for (int i = 0; i < number_of_chunks; i++) {
-        CHECK_CUDA(cub::DeviceReduce::Sum(workspace, cub_workspace_bytes, &black_tiles[i * CUB_CHUNK_SIZE], device_sum + 2 * i,
-                               std::min((long long) CUB_CHUNK_SIZE, grid_height * grid_width/2 - i * CUB_CHUNK_SIZE)));
-        CHECK_CUDA(cub::DeviceReduce::Sum(workspace, cub_workspace_bytes, &white_tiles[i*CUB_CHUNK_SIZE], device_sum + 2 * i + 1,
-                               std::min((long long) CUB_CHUNK_SIZE, grid_height * grid_width/2 - i * CUB_CHUNK_SIZE)));
-    }
-
-    double* host_sum;
-    host_sum = (double*)malloc(2 * number_of_chunks * sizeof(*host_sum));
-    CHECK_CUDA(cudaMemcpy(host_sum, device_sum, 2 * number_of_chunks * sizeof(*device_sum), cudaMemcpyDeviceToHost));
-    double total_sum = 0.0;
-    for (int i = 0; i < 2 * number_of_chunks; i++) {
-        total_sum += host_sum[i];
-    }
-    std::cout << "\taverage magnetism (absolute): " << abs(total_sum / (grid_height * grid_width)) << std::endl;
-
-    if (save_to_file)
-        write_lattice(black_tiles, white_tiles, "final_configuration.txt", grid_height, grid_width);
-    */
     return 0;
 }
