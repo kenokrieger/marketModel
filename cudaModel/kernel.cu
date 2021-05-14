@@ -248,7 +248,7 @@ void render()
         if (h_white_tiles[row * grid_width / 2 + col / 2] == -1) continue;
       }
       float xpos = col / (double)grid_width * 1000;
-      float ypos = row / (double)grid_width * 1000;
+      float ypos = 1000 - row / (double)grid_width * 1000;
 
       glBegin(GL_POLYGON);
 
