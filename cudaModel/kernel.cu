@@ -32,14 +32,14 @@ int total_updates = 0;
 unsigned int seed = std::chrono::steady_clock::now().time_since_epoch().count();
 float alpha = 0.0f;
 float j = 1.0f;
-float beta = 10 / 1.5f;
+float beta = 1 / 1.5f;
 
 signed char *black_tiles, *white_tiles;
 float *random_values;
 curandGenerator_t rng;
 signed char *h_black_tiles, *h_white_tiles;
 
-bool VISUALISE = true;
+bool VISUALISE = false;
 
 // The global market represents the sum over the strategies of each
 // agent. Agents will choose a strategy contrary to the sign of the
@@ -194,73 +194,115 @@ void reshape(int width, int height)
 
 void render()
 {
-  update(black_tiles, white_tiles, random_values, rng, d_global_market, alpha, beta, j, grid_height, grid_width);
-  total_updates += 1;
-  CHECK_CUDA(cudaMemcpy(h_global_market, d_global_market, sizeof(*d_global_market), cudaMemcpyDeviceToHost));
-  std::cout << "MARKET = " << h_global_market[0] << std::endl;
-  if (kbhit()) {
-    char pressed_key = getch();
-    // if the pressed key is "esc"
-    if (pressed_key == 27) {
-      std::string exit_confirmation;
-      std::cout << "Exit? ";
-      std::cin >> exit_confirmation;
-      if (exit_confirmation == "y" || exit_confirmation == "Y")
-      {
-        write_lattice(black_tiles, white_tiles, "final_configuration.dat", grid_height, grid_width);
-        exit(0);
-      }
-    }
+    CHECK_CUDA(cudaDeviceSynchronize());
+    timer::time_point start = timer::now();
+    update(black_tiles, white_tiles, random_values, rng, d_global_market, alpha, beta, j, grid_height, grid_width);
+    CHECK_CUDA(cudaDeviceSynchronize());
+    timer::time_point stop = timer::now();
+    total_updates += 1;
 
-    if (pressed_key == 's')
+    if (kbhit())
     {
-      write_lattice(black_tiles, white_tiles, "snapshot.dat", grid_height, grid_width);
-    }
+        char pressed_key = getch();
+        // if the pressed key is "esc"
+        if (pressed_key == 27)
+        {
+            std::string exit_confirmation;
+            std::cout << "Exit? ";
+            std::cin >> exit_confirmation;
+            if (exit_confirmation == "y" || exit_confirmation == "Y")
+            {
+              write_lattice(black_tiles, white_tiles, "final_configuration.dat", grid_height, grid_width);
+              exit(0);
+            }
+        }
 
-    // if the pressed key is "spacebar"
-    if (pressed_key == 32)
+        if (pressed_key == 's')
+        {
+            write_lattice(black_tiles, white_tiles, "snapshot.dat", grid_height, grid_width);
+        }
+
+        // if the pressed key is "spacebar"
+        if (pressed_key == 32)
+        {
+            const char* new_title = VISUALISE ? "Live View (paused)" : "Live View";
+            glutSetWindowTitle(new_title);
+            VISUALISE = !VISUALISE;
+        }
+
+        if (pressed_key == 'c')
+        {
+            std::string val;
+
+            std::cout << "New value for alpha?: " << std::flush;
+            std::getline(std::cin, val);
+            alpha = val != "" ? std::stof(val): alpha;
+
+            std::cout << "New value for beta?: " << std::flush;
+            std::getline(std::cin, val);
+            beta = val != "" ? std::stof(val): beta;
+
+            std::cout << "New value for j?: " << std::flush;
+            std::getline(std::cin, val);
+            j = val != "" ? std::stof(val): j;
+            printf("alpha = %f\n", alpha);
+            printf("beta = %f\n", beta);
+            printf("j = %f\n", j);
+        }
+
+        if (pressed_key == 'i')
+        {
+            CHECK_CUDA(cudaMemcpy(h_global_market, d_global_market, sizeof(*d_global_market), cudaMemcpyDeviceToHost));
+            double duration = (double) std::chrono::duration_cast<std::chrono::microseconds>(stop - start).count();
+            double spin_updates_per_nanosecond = grid_width * grid_height / duration * 1e-3;
+            printf("Current iteration: %d\n", total_updates);
+            printf("MARKET = %d\n", h_global_market[0]);
+            printf("Updates/ns = %f\n", spin_updates_per_nanosecond);
+        }
+        if (pressed_key == 'b')
+        {
+            std::string place_holder;
+            std::cout << "Resume? ";
+            std::getline(std::cin, place_holder);
+            printf("Resuming\n");
+        }
+    }
+    if (!VISUALISE) return;
+
+    CHECK_CUDA(cudaMemcpy(h_black_tiles, black_tiles, grid_height * grid_width / 2 * sizeof(*black_tiles), cudaMemcpyDeviceToHost));
+    CHECK_CUDA(cudaMemcpy(h_white_tiles, white_tiles, grid_height * grid_width / 2 * sizeof(*white_tiles), cudaMemcpyDeviceToHost));
+
+    glClear(GL_COLOR_BUFFER_BIT);
+    glLoadIdentity();
+
+    float size = 1 / (double)grid_width * 1000;
+
+    for (int row = 0; row < grid_width; row++)
     {
-    const char* new_title = VISUALISE ? "Live View (paused)" : "Live View";
-    glutSetWindowTitle(new_title);
-    VISUALISE = !VISUALISE;
+        for (int col = 0; col < grid_height; col++)
+        {
+            if (row % 2 == col % 2)
+            {
+              if (h_black_tiles[row * grid_width / 2 + col / 2] == -1) continue;
+            }
+            else
+            {
+              if (h_white_tiles[row * grid_width / 2 + col / 2] == -1) continue;
+            }
+            float xpos = col / (double)grid_width * 1000;
+            float ypos = 1000 - row / (double)grid_width * 1000;
+
+            glBegin(GL_POLYGON);
+
+            glVertex2f(xpos, ypos);
+            glVertex2f(xpos, ypos + size);
+            glVertex2f(xpos + size, ypos + size);
+            glVertex2f(xpos + size, ypos);
+
+            glEnd();
+        }
     }
-  }
-  if (!VISUALISE) return;
-
-  CHECK_CUDA(cudaMemcpy(h_black_tiles, black_tiles, grid_height * grid_width / 2 * sizeof(*black_tiles), cudaMemcpyDeviceToHost));
-  CHECK_CUDA(cudaMemcpy(h_white_tiles, white_tiles, grid_height * grid_width / 2 * sizeof(*white_tiles), cudaMemcpyDeviceToHost));
-
-  glClear(GL_COLOR_BUFFER_BIT);
-  glLoadIdentity();
-
-  float size = 1 / (double)grid_width * 1000;
-
-  for (int row = 0; row < grid_width; row++)
-  {
-    for (int col = 0; col < grid_height; col++)
-    {
-      if (row % 2 == col % 2)
-      {
-        if (h_black_tiles[row * grid_width / 2 + col / 2] == -1) continue;
-      }
-      else
-      {
-        if (h_white_tiles[row * grid_width / 2 + col / 2] == -1) continue;
-      }
-      float xpos = col / (double)grid_width * 1000;
-      float ypos = 1000 - row / (double)grid_width * 1000;
-
-      glBegin(GL_POLYGON);
-
-      glVertex2f(xpos, ypos);
-      glVertex2f(xpos, ypos + size);
-      glVertex2f(xpos + size, ypos + size);
-      glVertex2f(xpos + size, ypos);
-
-      glEnd();
-    }
-  }
-  glutSwapBuffers();
+    glutSwapBuffers();
 }
 
 int main(int argc, char** argv) {
@@ -308,7 +350,7 @@ int main(int argc, char** argv) {
   	glutInitWindowPosition((glutGet(GLUT_SCREEN_WIDTH) - 1000) / 2, 0);
   	glutInitWindowSize(1000, 1000);
 
-  	glutCreateWindow("Live View");
+  	glutCreateWindow("Live View (paused)");
 
     glClearColor(0.1f, 0.35f, 0.71f, 1.0f);
   	glutDisplayFunc(render);
