@@ -25,9 +25,9 @@
 #define THREADS 128
 
 // Default parameters
-int device_id = 0;
-const long long grid_height = 20 * 2048;
-const long long grid_width = 20 * 2048;
+int device_id = 1;
+const long long grid_height = 2 * 2048;
+const long long grid_width = 2 * 2048;
 int total_updates = 0;
 unsigned int seed = std::chrono::steady_clock::now().time_since_epoch().count();
 float alpha = 0.0f;
@@ -257,6 +257,7 @@ void render()
             CHECK_CUDA(cudaMemcpy(h_global_market, d_global_market, sizeof(*d_global_market), cudaMemcpyDeviceToHost));
             double duration = (double) std::chrono::duration_cast<std::chrono::microseconds>(stop - start).count();
             double spin_updates_per_nanosecond = grid_width * grid_height / duration * 1e-3;
+            printf("----------------------------------------------\n");
             printf("Current iteration: %d\n", total_updates);
             printf("grid = %lld x %lld\n", grid_width, grid_height);
             printf("alpha = %f\n", alpha);
@@ -264,6 +265,7 @@ void render()
             printf("j = %f\n", j);
             printf("MARKET = %d\n", h_global_market[0]);
             printf("Updates/ns = %f\n", spin_updates_per_nanosecond);
+            printf("----------------------------------------------\n");
         }
 
         if (pressed_key == 'b')
@@ -312,6 +314,12 @@ void render()
     }
     glutSwapBuffers();
     SHOW_RENDER_PROCESS = false;
+
+    if (grid_width > 2 * 2048)
+    {
+        printf("Continous animation is only possible for grid widths smaller 4096\nPress spacebar for a new frame.\n");
+        VISUALISE = false;
+    }
 }
 
 int main(int argc, char** argv) {
