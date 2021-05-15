@@ -26,8 +26,8 @@
 
 // Default parameters
 int device_id = 0;
-const long long grid_height = 2048;
-const long long grid_width = 2048;
+const long long grid_height = 20 * 2048;
+const long long grid_width = 20 * 2048;
 int total_updates = 0;
 unsigned int seed = std::chrono::steady_clock::now().time_since_epoch().count();
 float alpha = 0.0f;
@@ -40,6 +40,7 @@ curandGenerator_t rng;
 signed char *h_black_tiles, *h_white_tiles;
 
 bool VISUALISE = false;
+bool SHOW_RENDER_PROCESS = false;
 
 // The global market represents the sum over the strategies of each
 // agent. Agents will choose a strategy contrary to the sign of the
@@ -228,6 +229,7 @@ void render()
             const char* new_title = VISUALISE ? "Live View (paused)" : "Live View";
             glutSetWindowTitle(new_title);
             VISUALISE = !VISUALISE;
+            SHOW_RENDER_PROCESS = VISUALISE;
         }
 
         if (pressed_key == 'c')
@@ -256,9 +258,14 @@ void render()
             double duration = (double) std::chrono::duration_cast<std::chrono::microseconds>(stop - start).count();
             double spin_updates_per_nanosecond = grid_width * grid_height / duration * 1e-3;
             printf("Current iteration: %d\n", total_updates);
+            printf("grid = %lld x %lld\n", grid_width, grid_height);
+            printf("alpha = %f\n", alpha);
+            printf("beta = %f\n", beta);
+            printf("j = %f\n", j);
             printf("MARKET = %d\n", h_global_market[0]);
             printf("Updates/ns = %f\n", spin_updates_per_nanosecond);
         }
+
         if (pressed_key == 'b')
         {
             std::string place_holder;
@@ -301,8 +308,10 @@ void render()
 
             glEnd();
         }
+        if (SHOW_RENDER_PROCESS) glutSwapBuffers();
     }
     glutSwapBuffers();
+    SHOW_RENDER_PROCESS = false;
 }
 
 int main(int argc, char** argv) {
