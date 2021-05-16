@@ -25,7 +25,7 @@
 #include "device_launch_parameters.h"
 
 #define timer std::chrono::high_resolution_clock
-#define THREADS 128
+#define THREADS 40
 
 // Default parameters
 int device_id = 0;
@@ -221,7 +221,7 @@ void render()
                 std::string filename = "snapshots/snapshot_" + std::to_string(total_updates) + ".dat";
                 CHECK_CUDA(cudaMemcpy(h_black_tiles, d_black_tiles, grid_width * grid_height / 2 * sizeof(*d_black_tiles), cudaMemcpyDeviceToHost));
                 CHECK_CUDA(cudaMemcpy(h_white_tiles, d_white_tiles, grid_width * grid_height / 2 * sizeof(*d_white_tiles), cudaMemcpyDeviceToHost));
-                write_lattice(h_black_tiles, h_white_tiles, "snapshots/final_configuration.dat", grid_height, grid_width);
+                write_lattice(h_black_tiles, h_white_tiles, filename, grid_height, grid_width);
                 exit(0);
             }
         }
@@ -232,10 +232,6 @@ void render()
             CHECK_CUDA(cudaMemcpy(h_black_tiles, d_black_tiles, grid_width * grid_height / 2 * sizeof(*d_black_tiles), cudaMemcpyDeviceToHost));
             CHECK_CUDA(cudaMemcpy(h_white_tiles, d_white_tiles, grid_width * grid_height / 2 * sizeof(*d_white_tiles), cudaMemcpyDeviceToHost));
             write_lattice(h_black_tiles, h_white_tiles, filename, grid_height, grid_width);
-            std::string place_holder;
-            std::cout << "Resume? ";
-            std::getline(std::cin, place_holder);
-            printf("Resuming\n");
         }
 
         // if the pressed key is "spacebar"
@@ -280,6 +276,14 @@ void render()
             printf("j = %f\n", j);
             printf("MARKET = %d\n", h_global_market[0]);
             printf("Updates/ns = %f\n", spin_updates_per_nanosecond);
+        }
+
+        if (pressed_key == 'p')
+        {
+            std::string place_holder;
+            std::cout << "Resume? ";
+            std::getline(std::cin, place_holder);
+            printf("Resuming\n");
         }
     }
     if (!VISUALISE) return;
