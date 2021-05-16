@@ -16,7 +16,9 @@
 
 
 #define timer std::chrono::high_resolution_clock
-#define TRIAL_ITERATIONS 1000
+#define TRIAL_ITERATIONS 100
+#define MAX_THREADS 1024
+
 
 __global__ void init_agents(signed char* agents,
                             const float* __restrict__ random_values,
@@ -112,17 +114,16 @@ void update(int threads, signed char *d_black_tiles, signed char *d_white_tiles,
 
 double time_updates_per_nano_second(int threads, unsigned int seed, float alpha, float beta, float j, long long grid_height, long long grid_width, int* d_global_market)
 {
-    curandGenerator_t rng;
     signed char *d_black_tiles, *d_white_tiles;
     float *random_values;
-
+    curandGenerator_t rng;
     // Set up cuRAND generator
     CHECK_CURAND(curandCreateGenerator(&rng, CURAND_RNG_PSEUDO_PHILOX4_32_10));
     CHECK_CURAND(curandSetPseudoRandomGeneratorSeed(rng, seed));
 
     // allocate memory for the arrays
-    CHECK_CUDA(cudaMalloc(&d_white_tiles, grid_height * grid_width/2 * sizeof(*d_white_tiles)))
-    CHECK_CUDA(cudaMalloc(&d_black_tiles, grid_height * grid_width/2 * sizeof(*d_black_tiles)));
+    CHECK_CUDA(cudaMalloc(&d_white_tiles, grid_height * grid_width / 2 * sizeof(*d_white_tiles)))
+    CHECK_CUDA(cudaMalloc(&d_black_tiles, grid_height * grid_width / 2 * sizeof(*d_black_tiles)));
     CHECK_CUDA(cudaMalloc(&random_values, grid_height * grid_width / 2 * sizeof(*random_values)));
     CHECK_CUDA(cudaMalloc(&d_global_market, sizeof(*d_global_market)));
 
@@ -142,7 +143,10 @@ double time_updates_per_nano_second(int threads, unsigned int seed, float alpha,
     }
     timer::time_point stop = timer::now();
 
-    cudaFree(rng); cudaFree(d_black_tiles); cudaFree(d_white_tiles); cudaFree(random_values);
+    curandDestroyGenerator(rng);
+    cudaFree(d_black_tiles);
+    cudaFree(d_white_tiles);
+    cudaFree(random_values);
 
     double duration = (double) std::chrono::duration_cast<std::chrono::microseconds>(stop - start).count();
     double spin_updates_per_nanosecond = TRIAL_ITERATIONS * grid_width * grid_height / duration * 1e-3;
@@ -152,13 +156,12 @@ double time_updates_per_nano_second(int threads, unsigned int seed, float alpha,
 int main(int argc, char** argv)
 {
     // Default parameters
-    const long long grid_height = 128;
-    const long long grid_width = 128;
+    long long grid_height = 128;
+    long long grid_width = 128;
     unsigned int seed = std::chrono::steady_clock::now().time_since_epoch().count();
     float alpha = 1.0f;
     float j = 1.0f;
     float beta = 1 / 1.5f;
-
     // The global market represents the sum over the strategies of each
     // agent. Agents will choose a strategy contrary to the sign of the
     // global market.
@@ -174,30 +177,44 @@ int main(int argc, char** argv)
     double spin_updates_per_nanosecond;
     int blocks;
     std::ofstream file;
-    std::string filename = "logs/grid = " + std::to_string(grid_height) + 'x' + std::to_string(grid_width) + ".dat";
-    file.open(filename);
-    if (!file.is_open())
+    std::string filename;
+
+    //warm up
+    time_updates_per_nano_second(1024, 1, 2.0, 2.0, 2.0, 2000, 2000, d_global_market);
+
+
+    for (int trial = 1; trial < 20; trial++)
     {
-        printf("Could not write to file!\n");
-        return -1;
+        CHECK_CUDA(cudaDeviceSynchronize());
+        grid_width *= trial;
+        grid_height *= trial;
+        printf("\nSpeed test with grid = %lld x %lld \n", grid_width, grid_height);
+        filename = "logs/grid = " + std::to_string(grid_height) + 'x' + std::to_string(grid_width) + ".dat";
+        file.open(filename);
+        if (!file.is_open())
+        {
+            printf("Could not write to file!\n");
+            return -1;
+        }
+
+        file << '#' << "grid = " << grid_width << 'x' << grid_height << std::endl;
+        file << '#' << "beta = " << beta << std::endl;
+        file << '#' << "alpha = " << alpha << std::endl;
+        file << '#' << "j = " << j << std::endl;
+        file << '#' << "number_of_threads | spin_updates_per_nanosecond" << std::endl;
+
+        for (int number_of_threads = 1; number_of_threads < MAX_THREADS + 1; number_of_threads++)
+        {
+            blocks = (grid_height * grid_width / 2 + number_of_threads - 1) / number_of_threads;
+            spin_updates_per_nanosecond = time_updates_per_nano_second(number_of_threads, seed, alpha, beta, j, grid_height, grid_width, d_global_market);
+            file << number_of_threads << ' ' << spin_updates_per_nanosecond << std::endl;
+            std::cout << '\r' << "blocks: " << blocks << " | threads: " << number_of_threads << " | updates/ns: " << spin_updates_per_nanosecond;
+            std::cout << std::string(10, ' ') << std::string(10, '\b') << std::flush;
+            CHECK_CUDA(cudaDeviceSynchronize());
+
+        }
+        file.close();
     }
-
-    file << '#' << "grid = " << grid_width << 'x' << grid_height << std::endl;
-    file << '#' << "beta = " << beta << std::endl;
-    file << '#' << "alpha = " << alpha << std::endl;
-    file << '#' << "j = " << j << std::endl;
-    file << '#' << "number_of_threads | spin_updates_per_nanosecond" << std::endl;
-
-    for (int number_of_threads = 1; number_of_threads < 1e9; number_of_threads++)
-    {
-        blocks = (grid_height * grid_width / 2 + number_of_threads - 1) / number_of_threads;
-        spin_updates_per_nanosecond = time_updates_per_nano_second(number_of_threads, seed, alpha, beta, j, grid_height, grid_width, d_global_market);
-        file << number_of_threads << ' ' << spin_updates_per_nanosecond << std::endl;
-        std::cout << '\r' << "blocks: " << blocks << " | threads: " << number_of_threads << " | updates/ns: " << spin_updates_per_nanosecond;
-        std::cout << std::string(10, ' ') << std::string(10, '\b') << std::flush;
-    }
-
-    file.close();
     // Synchronize operations on the GPU with CPU
     CHECK_CUDA(cudaDeviceSynchronize());
     return 0;
