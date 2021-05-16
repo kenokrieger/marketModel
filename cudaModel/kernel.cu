@@ -4,6 +4,9 @@
 #include <string>
 #include<conio.h>
 
+#include <sys/types.h>
+#include <sys/stat.h>
+
 #include <GL/glut.h>
 #include <GL/freeglut_std.h>
 
@@ -25,16 +28,16 @@
 #define THREADS 128
 
 // Default parameters
-int device_id = 1;
-const long long grid_height = 2 * 2048;
-const long long grid_width = 2 * 2048;
+int device_id = 0;
+const long long grid_height = 2048;
+const long long grid_width = 2048;
 int total_updates = 0;
 unsigned int seed = std::chrono::steady_clock::now().time_since_epoch().count();
 float alpha = 0.0f;
 float j = 1.0f;
 float beta = 1 / 1.5f;
 
-signed char *black_tiles, *white_tiles;
+signed char *d_black_tiles, *d_white_tiles;
 float *random_values;
 curandGenerator_t rng;
 signed char *h_black_tiles, *h_white_tiles;
@@ -75,7 +78,8 @@ __global__ void update_agents(signed char* agents,
                               const float beta,
                               const float j,
                               const long long grid_height,
-                              const long long grid_width) {
+                              const long long grid_width)
+{
     const long long thread_id = static_cast<long long>(blockDim.x) * blockIdx.x + threadIdx.x;
     const int row = thread_id / grid_width;
     const int col = thread_id % grid_width;
@@ -124,64 +128,65 @@ __global__ void update_agents(signed char* agents,
 }
 
 // Write lattice configuration to file
-void write_lattice(signed char *lattice_b, signed char *lattice_w, std::string filename, long long nx, long long ny) {
-  signed char *lattice_h, *lattice_b_h, *lattice_w_h;
-  ProgressBar progress_bar = ProgressBar(nx);
-  lattice_h = (signed char*) malloc(nx * ny * sizeof(*lattice_h));
-  lattice_b_h = (signed char*) malloc(nx * ny/2 * sizeof(*lattice_b_h));
-  lattice_w_h = (signed char*) malloc(nx * ny/2 * sizeof(*lattice_w_h));
+void write_lattice(signed char *h_black_tiles, signed char *h_white_tiles, std::string filename, long long grid_width, long long grid_height)
+{
+    CHECK_CUDA(cudaMemcpy(h_global_market, d_global_market, sizeof(*d_global_market), cudaMemcpyDeviceToHost));
 
-  CHECK_CUDA(cudaMemcpy(lattice_b_h, lattice_b, nx * ny/2 * sizeof(*lattice_b), cudaMemcpyDeviceToHost));
-  CHECK_CUDA(cudaMemcpy(lattice_w_h, lattice_b, nx * ny/2 * sizeof(*lattice_w), cudaMemcpyDeviceToHost));
-  progress_bar.start();
-  for (int i = 0; i < nx; i++) {
-    for (int j = 0; j < ny/2; j++) {
-      if (i % 2) {
-        lattice_h[i*ny + 2*j+1] = lattice_b_h[i*ny/2 + j];
-        lattice_h[i*ny + 2*j] = lattice_w_h[i*ny/2 + j];
-      } else {
-        lattice_h[i*ny + 2*j] = lattice_b_h[i*ny/2 + j];
-        lattice_h[i*ny + 2*j+1] = lattice_w_h[i*ny/2 + j];
-      }
+    ProgressBar progress_bar = ProgressBar(grid_width);
+    progress_bar.start();
+    std::ofstream f;
+    progress_bar.start();
+
+    f.open(filename);
+    if (!f.is_open())
+    {
+        printf("Could not write to file!\n");
+        return;
     }
-  }
 
-  std::ofstream f;
-  progress_bar.start();
-  f.open(filename);
-  if (f.is_open()) {
-    for (int i = 0; i < nx; i++) {
-      progress_bar.next();
-      for (int j = 0; j < ny; j++) {
-         f << (int)lattice_h[i * ny + j] << " ";
-      }
-      f << std::endl;
+    f << '#' << "grid = " << grid_width << 'x' << grid_height << std::endl;
+    f << '#' << "beta = " << beta << std::endl;
+    f << '#' << "alpha = " << alpha << std::endl;
+    f << '#' << "j = " << j << std::endl;
+    f << '#' << "market = " << h_global_market[0] << std::endl;
+
+    for (int row = 0; row < grid_width; row++)
+    {
+        progress_bar.next();
+        for (int col = 0; col < grid_height; col++)
+        {
+            if (row % 2 == col % 2)
+            {
+                f << (int)h_black_tiles[row * grid_width / 2 + col / 2] << " ";
+            }
+            else
+            {
+                f << (int)h_white_tiles[row * grid_width / 2 + col / 2] << " ";
+            }
+          }
+          f << std::endl;
     }
-  }
-  f.close();
-
-  free(lattice_h);
-  free(lattice_b_h);
-  free(lattice_w_h);
-  progress_bar.end();
+    f.close();
+    progress_bar.end();
 }
 
-void update(signed char *black_tiles, signed char *white_tiles,
+void update(signed char *d_black_tiles, signed char *d_white_tiles,
             float* random_values,
             curandGenerator_t rng,
             int *d_global_market,
             float alpha, float beta, float j,
-            long long grid_height, long long grid_width) {
+            long long grid_height, long long grid_width)
+{
   // Setup CUDA launch configuration
   int blocks = (grid_height * grid_width/2 + THREADS - 1) / THREADS;
 
   // Update black tiles on "checkerboard"
   CHECK_CURAND(curandGenerateUniform(rng, random_values, grid_height * grid_width / 2));
-  update_agents<true><<<blocks, THREADS>>>(black_tiles, white_tiles, random_values, d_global_market, alpha, beta, j, grid_height, grid_width/2);
+  update_agents<true><<<blocks, THREADS>>>(d_black_tiles, d_white_tiles, random_values, d_global_market, alpha, beta, j, grid_height, grid_width/2);
 
   // Update white tiles on "checkerboard"
   CHECK_CURAND(curandGenerateUniform(rng, random_values, grid_height * grid_width / 2));
-  update_agents<false><<<blocks, THREADS>>>(white_tiles, black_tiles, random_values, d_global_market, alpha, beta, j, grid_height, grid_width/2);
+  update_agents<false><<<blocks, THREADS>>>(d_white_tiles, d_black_tiles, random_values, d_global_market, alpha, beta, j, grid_height, grid_width/2);
 }
 
 void reshape(int width, int height)
@@ -197,7 +202,7 @@ void render()
 {
     CHECK_CUDA(cudaDeviceSynchronize());
     timer::time_point start = timer::now();
-    update(black_tiles, white_tiles, random_values, rng, d_global_market, alpha, beta, j, grid_height, grid_width);
+    update(d_black_tiles, d_white_tiles, random_values, rng, d_global_market, alpha, beta, j, grid_height, grid_width);
     CHECK_CUDA(cudaDeviceSynchronize());
     timer::time_point stop = timer::now();
     total_updates += 1;
@@ -213,14 +218,24 @@ void render()
             std::cin >> exit_confirmation;
             if (exit_confirmation == "y" || exit_confirmation == "Y")
             {
-              write_lattice(black_tiles, white_tiles, "final_configuration.dat", grid_height, grid_width);
-              exit(0);
+                std::string filename = "snapshots/snapshot_" + std::to_string(total_updates) + ".dat";
+                CHECK_CUDA(cudaMemcpy(h_black_tiles, d_black_tiles, grid_width * grid_height / 2 * sizeof(*d_black_tiles), cudaMemcpyDeviceToHost));
+                CHECK_CUDA(cudaMemcpy(h_white_tiles, d_white_tiles, grid_width * grid_height / 2 * sizeof(*d_white_tiles), cudaMemcpyDeviceToHost));
+                write_lattice(h_black_tiles, h_white_tiles, "snapshots/final_configuration.dat", grid_height, grid_width);
+                exit(0);
             }
         }
 
         if (pressed_key == 's')
         {
-            write_lattice(black_tiles, white_tiles, "snapshot.dat", grid_height, grid_width);
+            std::string filename = "snapshots/snapshot_" + std::to_string(total_updates) + ".dat";
+            CHECK_CUDA(cudaMemcpy(h_black_tiles, d_black_tiles, grid_width * grid_height / 2 * sizeof(*d_black_tiles), cudaMemcpyDeviceToHost));
+            CHECK_CUDA(cudaMemcpy(h_white_tiles, d_white_tiles, grid_width * grid_height / 2 * sizeof(*d_white_tiles), cudaMemcpyDeviceToHost));
+            write_lattice(h_black_tiles, h_white_tiles, filename, grid_height, grid_width);
+            std::string place_holder;
+            std::cout << "Resume? ";
+            std::getline(std::cin, place_holder);
+            printf("Resuming\n");
         }
 
         // if the pressed key is "spacebar"
@@ -265,21 +280,12 @@ void render()
             printf("j = %f\n", j);
             printf("MARKET = %d\n", h_global_market[0]);
             printf("Updates/ns = %f\n", spin_updates_per_nanosecond);
-            printf("----------------------------------------------\n");
-        }
-
-        if (pressed_key == 'b')
-        {
-            std::string place_holder;
-            std::cout << "Resume? ";
-            std::getline(std::cin, place_holder);
-            printf("Resuming\n");
         }
     }
     if (!VISUALISE) return;
 
-    CHECK_CUDA(cudaMemcpy(h_black_tiles, black_tiles, grid_height * grid_width / 2 * sizeof(*black_tiles), cudaMemcpyDeviceToHost));
-    CHECK_CUDA(cudaMemcpy(h_white_tiles, white_tiles, grid_height * grid_width / 2 * sizeof(*white_tiles), cudaMemcpyDeviceToHost));
+    CHECK_CUDA(cudaMemcpy(h_black_tiles, d_black_tiles, grid_height * grid_width / 2 * sizeof(*d_black_tiles), cudaMemcpyDeviceToHost));
+    CHECK_CUDA(cudaMemcpy(h_white_tiles, d_white_tiles, grid_height * grid_width / 2 * sizeof(*d_white_tiles), cudaMemcpyDeviceToHost));
 
     glClear(GL_COLOR_BUFFER_BIT);
     glLoadIdentity();
@@ -314,12 +320,6 @@ void render()
     }
     glutSwapBuffers();
     SHOW_RENDER_PROCESS = false;
-
-    if (grid_width > 2 * 2048)
-    {
-        printf("Continous animation is only possible for grid widths smaller 4096\nPress spacebar for a new frame.\n");
-        VISUALISE = false;
-    }
 }
 
 int main(int argc, char** argv) {
@@ -344,8 +344,8 @@ int main(int argc, char** argv) {
     CHECK_CURAND(curandSetPseudoRandomGeneratorSeed(rng, seed));
 
     // allocate memory for the arrays
-    CHECK_CUDA(cudaMalloc(&white_tiles, grid_height * grid_width/2 * sizeof(*white_tiles)))
-    CHECK_CUDA(cudaMalloc(&black_tiles, grid_height * grid_width/2 * sizeof(*black_tiles)));
+    CHECK_CUDA(cudaMalloc(&d_white_tiles, grid_height * grid_width/2 * sizeof(*d_white_tiles)))
+    CHECK_CUDA(cudaMalloc(&d_black_tiles, grid_height * grid_width/2 * sizeof(*d_black_tiles)));
     CHECK_CUDA(cudaMalloc(&random_values, grid_height * grid_width / 2 * sizeof(*random_values)));
     CHECK_CUDA(cudaMalloc(&d_global_market, sizeof(*d_global_market)));
     h_black_tiles = (signed char*)malloc(grid_height * grid_width / 2 * sizeof(*h_black_tiles));
@@ -354,12 +354,19 @@ int main(int argc, char** argv) {
 
     int blocks = (grid_height * grid_width/2 + THREADS - 1) / THREADS;
     CHECK_CURAND(curandGenerateUniform(rng, random_values, grid_height * grid_width / 2));
-    init_agents<<<blocks, THREADS>>>(black_tiles, random_values, grid_height, grid_width / 2);
+    init_agents<<<blocks, THREADS>>>(d_black_tiles, random_values, grid_height, grid_width / 2);
     CHECK_CURAND(curandGenerateUniform(rng, random_values, grid_height * grid_width / 2));
-    init_agents<<<blocks, THREADS>>>(white_tiles, random_values, grid_height, grid_width / 2);
+    init_agents<<<blocks, THREADS>>>(d_white_tiles, random_values, grid_height, grid_width / 2);
 
     // Synchronize operations on the GPU with CPU
     CHECK_CUDA(cudaDeviceSynchronize());
+
+    // create directory for saves if not already exists
+    struct stat st = {0};
+
+    if (stat("snapshots", &st) == -1) {
+        CreateDirectoryA("snapshots", NULL);
+    }
 
     glutInit(&argc, argv);
   	glutInitDisplayMode(GLUT_RGB);

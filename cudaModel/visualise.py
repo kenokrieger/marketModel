@@ -33,7 +33,7 @@ def save_color_map(data_directory, saves_directory):
 
 
 def save_frame(data_directory, saves_directory, frame_number):
-    frame = "snapshot.dat" #"frame_{}.dat".format(frame_number)
+    frame = "snapshot_11267.dat" #"frame_{}.dat".format(frame_number)
     img_path = saves_directory + frame.replace(".dat", ".png")
     data_file_path = data_directory + frame
     print("Plotting {}".format(frame))
@@ -47,7 +47,7 @@ def save_frame(data_directory, saves_directory, frame_number):
 
 
 if __name__ == "__main__":
-    save_frame("", saves_directory, 1)
+    save_frame("build/", saves_directory, 1)
     exit()
     if not plot_multiple:
         save_frame(data_directory, saves_directory, frame_number)

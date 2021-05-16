@@ -30,3 +30,6 @@ nvcc -l curand -l opengl32 -I common\inc -I Libraries\include --library-path Lib
 The -l option tells the compiler that the curand library is used. The -I option
 specifies the path to external dependencies. The resulting file will be placed
 in the build directory.
+
+To run on remote desktop call "query session" and execute the modified
+marketModel.bat file as an administrator.
