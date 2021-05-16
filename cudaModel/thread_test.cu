@@ -16,7 +16,7 @@
 
 
 #define timer std::chrono::high_resolution_clock
-#define TRIAL_ITERATIONS 100
+#define TRIAL_ITERATIONS 10000
 #define MAX_THREADS 1024
 
 
@@ -118,16 +118,19 @@ double time_updates_per_nano_second(int threads, unsigned int seed, float alpha,
     float *random_values;
     curandGenerator_t rng;
     // Set up cuRAND generator
+    cudaSetDevice(1);
     CHECK_CURAND(curandCreateGenerator(&rng, CURAND_RNG_PSEUDO_PHILOX4_32_10));
     CHECK_CURAND(curandSetPseudoRandomGeneratorSeed(rng, seed));
 
     // allocate memory for the arrays
+    cudaSetDevice(1);
     CHECK_CUDA(cudaMalloc(&d_white_tiles, grid_height * grid_width / 2 * sizeof(*d_white_tiles)))
     CHECK_CUDA(cudaMalloc(&d_black_tiles, grid_height * grid_width / 2 * sizeof(*d_black_tiles)));
     CHECK_CUDA(cudaMalloc(&random_values, grid_height * grid_width / 2 * sizeof(*random_values)));
     CHECK_CUDA(cudaMalloc(&d_global_market, sizeof(*d_global_market)));
 
     // initialise agents
+    cudaSetDevice(1);
     int blocks = (grid_height * grid_width/2 + threads - 1) / threads;
     CHECK_CURAND(curandGenerateUniform(rng, random_values, grid_height * grid_width / 2));
     init_agents<<<blocks, threads>>>(d_black_tiles, random_values, grid_height, grid_width / 2);
@@ -156,8 +159,10 @@ double time_updates_per_nano_second(int threads, unsigned int seed, float alpha,
 int main(int argc, char** argv)
 {
     // Default parameters
-    long long grid_height = 128;
-    long long grid_width = 128;
+    const long long base_grid_height = 128;
+    const long long base_grid_width = 128;
+    long long grid_width;
+    long long grid_height;
     unsigned int seed = std::chrono::steady_clock::now().time_since_epoch().count();
     float alpha = 1.0f;
     float j = 1.0f;
@@ -166,6 +171,7 @@ int main(int argc, char** argv)
     // agent. Agents will choose a strategy contrary to the sign of the
     // global market.
     int *d_global_market;
+    cudaSetDevice(1);
     CHECK_CUDA(cudaMalloc(&d_global_market, sizeof(*d_global_market)));
     // create directory for saves if not already exists
     struct stat st = {0};
@@ -179,15 +185,18 @@ int main(int argc, char** argv)
     std::ofstream file;
     std::string filename;
 
+
     //warm up
     time_updates_per_nano_second(1024, 1, 2.0, 2.0, 2.0, 2000, 2000, d_global_market);
 
 
-    for (int trial = 1; trial < 20; trial++)
+    // test for grid size up to maximum memory
+    for (int trial = 1; trial < 398; trial++)
     {
+        cudaSetDevice(1);
         CHECK_CUDA(cudaDeviceSynchronize());
-        grid_width *= trial;
-        grid_height *= trial;
+        grid_width = trial * base_grid_width;
+        grid_height = trial * base_grid_height;
         printf("\nSpeed test with grid = %lld x %lld \n", grid_width, grid_height);
         filename = "logs/grid = " + std::to_string(grid_height) + 'x' + std::to_string(grid_width) + ".dat";
         file.open(filename);
@@ -210,6 +219,7 @@ int main(int argc, char** argv)
             file << number_of_threads << ' ' << spin_updates_per_nanosecond << std::endl;
             std::cout << '\r' << "blocks: " << blocks << " | threads: " << number_of_threads << " | updates/ns: " << spin_updates_per_nanosecond;
             std::cout << std::string(10, ' ') << std::string(10, '\b') << std::flush;
+            cudaSetDevice(1);
             CHECK_CUDA(cudaDeviceSynchronize());
 
         }
