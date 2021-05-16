@@ -3,6 +3,7 @@
 #include <iostream>
 #include <string>
 #include<conio.h>
+#include <windows.h>
 
 #include <sys/types.h>
 #include <sys/stat.h>
@@ -25,12 +26,13 @@
 #include "device_launch_parameters.h"
 
 #define timer std::chrono::high_resolution_clock
-#define THREADS 40
+
 
 // Default parameters
 int device_id = 0;
-const long long grid_height = 2048;
-const long long grid_width = 2048;
+int threads = 128;
+const long long grid_height = 10 * 2048;
+const long long grid_width = 10 * 2048;
 int total_updates = 0;
 unsigned int seed = std::chrono::steady_clock::now().time_since_epoch().count();
 float alpha = 0.0f;
@@ -177,16 +179,16 @@ void update(signed char *d_black_tiles, signed char *d_white_tiles,
             float alpha, float beta, float j,
             long long grid_height, long long grid_width)
 {
-  // Setup CUDA launch configuration
-  int blocks = (grid_height * grid_width/2 + THREADS - 1) / THREADS;
+    // Setup CUDA launch configuration
+    int blocks = (grid_height * grid_width/2 + threads - 1) / threads;
 
-  // Update black tiles on "checkerboard"
-  CHECK_CURAND(curandGenerateUniform(rng, random_values, grid_height * grid_width / 2));
-  update_agents<true><<<blocks, THREADS>>>(d_black_tiles, d_white_tiles, random_values, d_global_market, alpha, beta, j, grid_height, grid_width/2);
+    // Update black tiles on "checkerboard"
+    CHECK_CURAND(curandGenerateUniform(rng, random_values, grid_height * grid_width / 2));
+    update_agents<true><<<blocks, THREADS>>>(d_black_tiles, d_white_tiles, random_values, d_global_market, alpha, beta, j, grid_height, grid_width/2);
 
-  // Update white tiles on "checkerboard"
-  CHECK_CURAND(curandGenerateUniform(rng, random_values, grid_height * grid_width / 2));
-  update_agents<false><<<blocks, THREADS>>>(d_white_tiles, d_black_tiles, random_values, d_global_market, alpha, beta, j, grid_height, grid_width/2);
+    // Update white tiles on "checkerboard"
+    CHECK_CURAND(curandGenerateUniform(rng, random_values, grid_height * grid_width / 2));
+    update_agents<false><<<blocks, THREADS>>>(d_white_tiles, d_black_tiles, random_values, d_global_market, alpha, beta, j, grid_height, grid_width/2);
 }
 
 void reshape(int width, int height)

@@ -25,6 +25,7 @@ Then compile the code with the nvcc-compiler.
 
 ```terminal
 nvcc -l curand -l opengl32 -I common\inc -I Libraries\include --library-path Libraries\lib kernel.cu ProgressBar.cpp -o build\model.exe
+nvcc -l curand thread_test.cu -o build\threads.exe
 ```
 
 The -l option tells the compiler that the curand library is used. The -I option

@@ -3,3 +3,4 @@
 cudaModel/build/*
 cudaModel/build2/*
 cudaModel/snapshots/*
+cudaModel/logs/*
