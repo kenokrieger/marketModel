@@ -31,10 +31,15 @@
 // Default parameters
 int device_id = 0;
 int threads = 1024;
-const long long grid_height = 2048;
-const long long grid_width = 2048;
+const long long grid_height = 1024;
+const long long grid_width = 1024;
 int total_updates = 0;
 unsigned int seed = std::chrono::steady_clock::now().time_since_epoch().count();
+// the rng offset can be used to revert the random number generator to a specific
+// state of a simulation. It is equal to the total number of random numbers
+// generated. Meaning the following equation holds for this specific case:
+// rng_offset = total_updates * grid_width * grid_height
+long long rng_offset = 0;
 float alpha = 0.0f;
 float j = 1.0f;
 float beta = 1 / 1.5f;
@@ -151,6 +156,8 @@ void write_lattice(signed char *h_black_tiles, signed char *h_white_tiles, std::
     f << '#' << "alpha = " << alpha << std::endl;
     f << '#' << "j = " << j << std::endl;
     f << '#' << "market = " << h_global_market[0] << std::endl;
+    f << '#' << "seed = " << seed << std::endl;
+    f << '#' << "total updates = " << total_updates << std::endl;
 
     for (int row = 0; row < grid_width; row++)
     {
@@ -179,14 +186,11 @@ void update(signed char *d_black_tiles, signed char *d_white_tiles,
             float alpha, float beta, float j,
             long long grid_height, long long grid_width)
 {
-    // Setup CUDA launch configuration
     int blocks = (grid_height * grid_width/2 + threads - 1) / threads;
 
-    // Update black tiles on "checkerboard"
     CHECK_CURAND(curandGenerateUniform(rng, random_values, grid_height * grid_width / 2));
     update_agents<true><<<blocks, threads>>>(d_black_tiles, d_white_tiles, random_values, d_global_market, alpha, beta, j, grid_height, grid_width/2);
 
-    // Update white tiles on "checkerboard"
     CHECK_CURAND(curandGenerateUniform(rng, random_values, grid_height * grid_width / 2));
     update_agents<false><<<blocks, threads>>>(d_white_tiles, d_black_tiles, random_values, d_global_market, alpha, beta, j, grid_height, grid_width/2);
 }
@@ -348,6 +352,7 @@ int main(int argc, char** argv) {
     // Set up cuRAND generator
     CHECK_CURAND(curandCreateGenerator(&rng, CURAND_RNG_PSEUDO_PHILOX4_32_10));
     CHECK_CURAND(curandSetPseudoRandomGeneratorSeed(rng, seed));
+    CHECK_CURAND(curandSetGeneratorOffset(rng, rng_offset));
 
     // allocate memory for the arrays
     CHECK_CUDA(cudaMalloc(&d_white_tiles, grid_height * grid_width/2 * sizeof(*d_white_tiles)))
@@ -370,6 +375,7 @@ int main(int argc, char** argv) {
     // create directory for saves if not already exists
     struct stat st = {0};
 
+    // create directory snapshots if it does not exist already
     if (stat("snapshots", &st) == -1) {
         CreateDirectoryA("snapshots", NULL);
     }
