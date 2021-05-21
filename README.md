@@ -3,8 +3,42 @@
 <img src="https://img.shields.io/github/issues/kenokrieger/marketModel"> <img src="https://img.shields.io/github/commit-activity/m/kenokrieger/marketModel">
 <img src="http://qmpy.org/badges/license.svg">
 
-Modified source code from the Ising Model built by
+Modified source code from the GPU Ising Model built by
 <a href="https://github.com/romerojosh">Joshua Romero</a>.
+
+## Outline
+
+This particular model attempts to predict the behaviour of traders in a market
+governed by two simple guidelines:
+
+- Do as neighbours do
+
+- Do what the minority does
+
+mathematically speaking is each trader represented by a spin on a two dimensional
+grid. The local field of each spin *S*<sub>i</sub> is given by the equation below
+
+<img src="https://render.githubusercontent.com/render/math?math=h_i(t) = \sum_{j = 1}^N J_ij S_j - \alpha S_i \left| \frac{1}{N} \sum_{j = 1}^N S_j \right|">
+
+where *J*<sub>ij</sub> = *j* for the nearest neighbours and 0 otherwise. The spins
+are updated according to a Heatbath dynamic which reads as follows
+
+<img src="https://render.githubusercontent.com/render/math?math=S_i(t + 1) = +1 \quad \mathrm{with} \quad p = \frac{1}{1 + \exp(-2\beta h_i(t))}">
+<img src="https://render.githubusercontent.com/render/math?math=S_i(t + 1) = -1 \quad \mathrm{with} \quad 1 - p">
+
+The model thus is controlled by the three parameters
+
+- &alpha;, which represents the tendency of the traders to be in the minority
+
+- *j*, which affects how likely it is for a trader to pick up the strategy of its neighbour
+
+- &beta;, which controls the randomness
+
+In each iteration all spins are updated in parallel using the metropolis
+algorithm.
+(For more details see <a href="https://arxiv.org/pdf/cond-mat/0105224.pdf">
+S.Bornholdt, "Expectation bubbles in a spin model of markets: Intermittency from
+frustration across scales"</a>)
 
 ## Compiling
 
@@ -21,16 +55,52 @@ located and execute the vcvarsall.bat file, e.g.:
 ```
 
 This should configure the terminal to find all paths needed for compilation.
-Then compile the code with the nvcc-compiler.
+Then compile the code with the nvcc-compiler. To compile the simulation use
 
 ```terminal
-nvcc -l curand -l opengl32 -I common\inc -I Libraries\include --library-path Libraries\lib kernel.cu ProgressBar.cpp -o build\model.exe
+nvcc -l curand -I common\inc -I Libraries\include --library-path Libraries\lib kernel.cu ProgressBar.cpp -o build\model.exe
+```
+
+For the thread speed test use
+
+```terminal
 nvcc -l curand thread_test.cu -o build\threads.exe
 ```
 
-The -l option tells the compiler that the curand library is used. The -I option
-specifies the path to external dependencies. The resulting file will be placed
-in the build directory.
+Additional libraries used are specified through the -l option. Additional include
+paths are specified with the -I option.
 
-To run on remote desktop call "query session" and execute the modified
-marketModel.bat file as an administrator.
+OpenGl will fail to create a window when used in a remote desktop session. To
+use the program in a remote session, write a batch script that first closes the
+session
+
+```terminal
+tscon rdp-tcp#YOUR_SESSION_ID /dest:console
+```
+
+and the runs the program by simply calling it from the command line. Then simply reconnect to the remote desktop.
+You can get your session id by running
+
+```terminal
+query session
+```
+
+in the terminal. </br>
+Note that you need to execute the batch file as an administrator.
+
+## Running the executable
+
+**Note**: Command line arguments are currently not supported which means if you want
+to change some of the parameters you need to change their values in the code itself.</br>
+
+Upon running the executable for the simulation you may adjust the parameters, get a live
+view or save the current configuration to a file, by pressing specific buttons (see table below).
+
+| key      | function                                              |
+|----------|-------------------------------------------------------|
+| esc      | Save the current state and close the simulation       |
+| spacebar | Toggle liew view on and off                           |
+| s        | Save the current state to a file                      |
+| c        | Change the parameters                                 |
+| i        | Prints out information on the state of the simulation |
+| p        | Pause the simulation                                  |

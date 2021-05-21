@@ -94,36 +94,36 @@ __global__ void update_agents(signed char* agents,
     // check for out of bound access
     if (row >= grid_height || col >= grid_width) return;
 
-    // determine nearest neighbors on the opposite grid
-    int lower_neighbor_row = (row + 1 < grid_height) ? row + 1 : 0;
-    int upper_neighbor_row = (row - 1 >= 0) ? row - 1: grid_height - 1;
-    int right_neighbor_col = (col + 1 < grid_width) ? col + 1 : 0;
-    int left_neighbor_col = (col - 1 >= 0) ? col - 1: grid_width - 1;
+    // determine nearest neighbours on the opposite grid
+    int lower_neighbour_row = (row + 1 < grid_height) ? row + 1 : 0;
+    int upper_neighbour_row = (row - 1 >= 0) ? row - 1: grid_height - 1;
+    int right_neighbour_col = (col + 1 < grid_width) ? col + 1 : 0;
+    int left_neighbour_col = (col - 1 >= 0) ? col - 1: grid_width - 1;
 
     // Select off-column index based on color and row index parity:
-    // One of the neighbors will always have the exact same index
+    // One of the neighbours will always have the exact same index
     // as the agents where as the remaining one will either have an
     // index differing by +1 or -1 depending on the position of the
     // agent on the grid
-    int horizontal_neighbor_col;
+    int horizontal_neighbour_col;
     if (is_black) {
-        horizontal_neighbor_col = (row % 2) ? right_neighbor_col : left_neighbor_col;
+        horizontal_neighbour_col = (row % 2) ? right_neighbour_col : left_neighbour_col;
     } else {
-        horizontal_neighbor_col = (row % 2) ? left_neighbor_col : right_neighbor_col;
+        horizontal_neighbour_col = (row % 2) ? left_neighbour_col : right_neighbour_col;
     }
-    // Compute sum of nearest neighbor spins:
+    // Compute sum of nearest neighbour spins:
     // Multiply the row with the grid-width to receive
     // the actual index in the array
-    float neighbor_coupling = j * (
-            checkerboard_agents[upper_neighbor_row * grid_width + col]
-          + checkerboard_agents[lower_neighbor_row * grid_width + col]
+    float neighbour_coupling = j * (
+            checkerboard_agents[upper_neighbour_row * grid_width + col]
+          + checkerboard_agents[lower_neighbour_row * grid_width + col]
           + checkerboard_agents[row * grid_width + col]
-          + checkerboard_agents[row * grid_width + horizontal_neighbor_col]
+          + checkerboard_agents[row * grid_width + horizontal_neighbour_col]
           );
 
     signed char old_strategy = agents[row * grid_width + col];
     double market_coupling = -alpha / (grid_width * grid_height) * abs(d_global_market[0]);
-    double field = neighbor_coupling + market_coupling * old_strategy;
+    double field = neighbour_coupling + market_coupling * old_strategy;
     // Determine whether to flip spin
     float probability = 1 / (1 + exp(-2.0 * beta * field));
     signed char new_strategy = random_values[row * grid_width + col] < probability ? 1 : -1;
