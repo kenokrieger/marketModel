@@ -26,7 +26,7 @@ are updated according to a Heatbath dynamic which reads as follows
 <img src="https://render.githubusercontent.com/render/math?math=S_i(t %2B 1) = %2B 1 \quad \mathrm{with} \quad p = \frac{1}{1 %2B \exp(-2\beta h_i(t))}">
 <img src="https://render.githubusercontent.com/render/math?math=S_i(t %2B 1) = -1 \quad \mathrm{with} \quad 1 - p">
 
-The model thus is controlled by the three parameters
+The model is thus controlled by the three parameters
 
 - &alpha;, which represents the tendency of the traders to be in the minority
 
@@ -35,10 +35,10 @@ The model thus is controlled by the three parameters
 - &beta;, which controls the randomness
 
 In each iteration all spins are updated in parallel using the metropolis
-algorithm.
+algorithm. </br>
 (For more details see <a href="https://arxiv.org/pdf/cond-mat/0105224.pdf">
 S.Bornholdt, "Expectation bubbles in a spin model of markets: Intermittency from
-frustration across scales"</a>)
+frustration across scales, 2001"</a>)
 
 ## Compiling
 
