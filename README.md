@@ -18,13 +18,13 @@ governed by two simple guidelines:
 mathematically speaking is each trader represented by a spin on a two dimensional
 grid. The local field of each spin *S*<sub>i</sub> is given by the equation below
 
-<img src="https://render.githubusercontent.com/render/math?math=h_i(t) = \sum_{j = 1}^N J_ij S_j - \alpha S_i \left| \frac{1}{N} \sum_{j = 1}^N S_j \right|">
+<img src="https://render.githubusercontent.com/render/math?math=h_i(t) = \sum_{j = 1}^N J_{ij} S_j - \alpha S_i \left| \frac{1}{N} \sum_{j = 1}^N S_j \right|">
 
 where *J*<sub>ij</sub> = *j* for the nearest neighbours and 0 otherwise. The spins
 are updated according to a Heatbath dynamic which reads as follows
 
-<img src="https://render.githubusercontent.com/render/math?math=S_i(t + 1) = +1 \quad \mathrm{with} \quad p = \frac{1}{1 + \exp(-2\beta h_i(t))}">
-<img src="https://render.githubusercontent.com/render/math?math=S_i(t + 1) = -1 \quad \mathrm{with} \quad 1 - p">
+<img src="https://render.githubusercontent.com/render/math?math=S_i(t %2B 1) = %2B 1 \quad \mathrm{with} \quad p = \frac{1}{1 %2B \exp(-2\beta h_i(t))}">
+<img src="https://render.githubusercontent.com/render/math?math=S_i(t %2B 1) = -1 \quad \mathrm{with} \quad 1 - p">
 
 The model thus is controlled by the three parameters
 
@@ -104,3 +104,7 @@ view or save the current configuration to a file, by pressing specific buttons (
 | c        | Change the parameters                                 |
 | i        | Prints out information on the state of the simulation |
 | p        | Pause the simulation                                  |
+
+To visualise some of the configurations saved to a file simply invoke the
+python script 'visualise.py' with the path to the save file(s) as command line
+arguments.
