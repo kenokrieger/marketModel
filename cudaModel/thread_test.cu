@@ -118,19 +118,19 @@ double time_updates_per_nano_second(int threads, unsigned int seed, float alpha,
     float *random_values;
     curandGenerator_t rng;
     // Set up cuRAND generator
-    cudaSetDevice(1);
+    cudaSetDevice(0);
     CHECK_CURAND(curandCreateGenerator(&rng, CURAND_RNG_PSEUDO_PHILOX4_32_10));
     CHECK_CURAND(curandSetPseudoRandomGeneratorSeed(rng, seed));
 
     // allocate memory for the arrays
-    cudaSetDevice(1);
+    cudaSetDevice(0);
     CHECK_CUDA(cudaMalloc(&d_white_tiles, grid_height * grid_width / 2 * sizeof(*d_white_tiles)))
     CHECK_CUDA(cudaMalloc(&d_black_tiles, grid_height * grid_width / 2 * sizeof(*d_black_tiles)));
     CHECK_CUDA(cudaMalloc(&random_values, grid_height * grid_width / 2 * sizeof(*random_values)));
     CHECK_CUDA(cudaMalloc(&d_global_market, sizeof(*d_global_market)));
 
     // initialise agents
-    cudaSetDevice(1);
+    cudaSetDevice(0);
     int blocks = (grid_height * grid_width/2 + threads - 1) / threads;
     CHECK_CURAND(curandGenerateUniform(rng, random_values, grid_height * grid_width / 2));
     init_agents<<<blocks, threads>>>(d_black_tiles, random_values, grid_height, grid_width / 2);
@@ -171,7 +171,7 @@ int main(int argc, char** argv)
     // agent. Agents will choose a strategy contrary to the sign of the
     // global market.
     int *d_global_market;
-    cudaSetDevice(1);
+    cudaSetDevice(0);
     CHECK_CUDA(cudaMalloc(&d_global_market, sizeof(*d_global_market)));
     // create directory for saves if not already exists
     struct stat st = {0};
@@ -191,9 +191,9 @@ int main(int argc, char** argv)
 
 
     // test for grid size up to maximum memory
-    for (int trial = 1; trial < 398; trial++)
+    for (int trial = 1; trial < 15; trial++)
     {
-        cudaSetDevice(1);
+        cudaSetDevice(0);
         CHECK_CUDA(cudaDeviceSynchronize());
         grid_width = trial * base_grid_width;
         grid_height = trial * base_grid_height;
@@ -212,14 +212,14 @@ int main(int argc, char** argv)
         file << '#' << "j = " << j << std::endl;
         file << '#' << "number_of_threads | spin_updates_per_nanosecond" << std::endl;
 
-        for (int number_of_threads = 1; number_of_threads < MAX_THREADS + 1; number_of_threads++)
+        for (int number_of_threads = 400; number_of_threads < 401; number_of_threads++)
         {
             blocks = (grid_height * grid_width / 2 + number_of_threads - 1) / number_of_threads;
             spin_updates_per_nanosecond = time_updates_per_nano_second(number_of_threads, seed, alpha, beta, j, grid_height, grid_width, d_global_market);
             file << number_of_threads << ' ' << spin_updates_per_nanosecond << std::endl;
             std::cout << '\r' << "blocks: " << blocks << " | threads: " << number_of_threads << " | updates/ns: " << spin_updates_per_nanosecond;
             std::cout << std::string(10, ' ') << std::string(10, '\b') << std::flush;
-            cudaSetDevice(1);
+            cudaSetDevice(0);
             CHECK_CUDA(cudaDeviceSynchronize());
 
         }

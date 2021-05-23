@@ -93,6 +93,9 @@ Note that you need to execute the batch file as an administrator.
 **Note**: Command line arguments are currently not supported which means if you want
 to change some of the parameters you need to change their values in the code itself.</br>
 
+To successfully run the program, it needs to find the 'freeglut.dll' file which
+you can download from http://freeglut.sourceforge.net. <br/>
+
 Upon running the executable for the simulation you may adjust the parameters, get a live
 view or save the current configuration to a file, by pressing specific buttons (see table below).
 
@@ -108,3 +111,15 @@ view or save the current configuration to a file, by pressing specific buttons (
 To visualise some of the configurations saved to a file simply invoke the
 python script 'visualise.py' with the path to the save file(s) as command line
 arguments.
+
+## Profiling
+
+Need to add to path
+
+```terminal
+C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v10.2\extras\CUPTI\lib64
+```
+
+```terminal
+nvprof --log-file threads.profile threads.exe
+```
