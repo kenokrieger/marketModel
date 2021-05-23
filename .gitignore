@@ -1,6 +1,6 @@
 *.mp4
 *.png
-cudaModel/build/*
-cudaModel/build2/*
+*.dat
+cudaModel/builds/*
 cudaModel/snapshots/*
 cudaModel/logs/*

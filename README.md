@@ -58,13 +58,13 @@ This should configure the terminal to find all paths needed for compilation.
 Then compile the code with the nvcc-compiler. To compile the simulation use
 
 ```terminal
-nvcc -l curand -I common\inc -I Libraries\include --library-path Libraries\lib kernel.cu ProgressBar.cpp -o build\model.exe
+nvcc -l curand -I common\inc -I Libraries\include --library-path Libraries\lib model.source\kernel.cu model.source\ProgressBar.cpp -o builds\model\model.exe
 ```
 
-For the thread speed test use
+For the profiling use
 
 ```terminal
-nvcc -l curand thread_test.cu -o build\threads.exe
+nvcc -l curand -I common\inc profile.source\profiling.cu -o builds\profiling\profiling.exe
 ```
 
 Additional libraries used are specified through the -l option. Additional include
@@ -121,5 +121,5 @@ C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v10.2\extras\CUPTI\lib64
 ```
 
 ```terminal
-nvprof --log-file threads.profile threads.exe
+nvprof --log-file profiles\threads.profile builds\profiling\profiling.exe
 ```
