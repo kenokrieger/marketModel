@@ -58,7 +58,7 @@ This should configure the terminal to find all paths needed for compilation.
 Then compile the code with the nvcc-compiler. To compile the simulation use
 
 ```terminal
-nvcc -l curand -I common\inc -I Libraries\include --library-path Libraries\lib model.source\kernel.cu model.source\ProgressBar.cpp -o builds\model\model.exe
+nvcc -l curand -I common\inc -I Libraries\include --library-path Libraries\lib model.source\kernel.cu model.source\ProgressBar.cpp model.source\traders.cu -o builds\model\model.exe
 ```
 
 For the profiling use

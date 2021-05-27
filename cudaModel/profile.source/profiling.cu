@@ -69,7 +69,7 @@ __global__ void update_agents(signed char* agents,
     // Compute sum of nearest neighbor spins:
     // Multiply the row with the grid-width to receive
     // the actual index in the array
-    float neighbor_coupling =
+    signed char neighbor_coupling =
             checkerboard_agents[upper_neighbor_row * grid_width + col]
           + checkerboard_agents[lower_neighbor_row * grid_width + col]
           + checkerboard_agents[row * grid_width + col]
